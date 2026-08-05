@@ -158,6 +158,9 @@ app.post('/api/clips/youtube', (req, res) => {
       '--print', 'after_move:%(title)s',
       '--no-simulate',
       '--js-runtimes', 'node',
+      '--extractor-args', 'youtube:player_client=android,ios,web',
+      '--no-check-certificates',
+      '--no-warnings',
       '-f', 'best[height<=720]/best',
       '--recode-video', 'mp4',
       '-o', targetPath,
@@ -167,7 +170,8 @@ app.post('/api/clips/youtube', (req, res) => {
     require('child_process').execFile(ytDlpPath, args, { timeout: 180000 }, (err, stdout, stderr) => {
       if (err) {
         console.error('yt-dlp download error:', err, stderr);
-        return res.status(500).json({ error: 'Failed to download YouTube video. Make sure the link is a valid public video or short!' });
+        const detail = stderr ? stderr.split('\n').filter(l => l.includes('ERROR:') || l.includes('error:') || l.trim() !== '').slice(0, 2).join(' - ') : err.message;
+        return res.status(500).json({ error: `YouTube import failed on server: ${detail || 'Unknown yt-dlp execution error'}` });
       }
 
       try {
