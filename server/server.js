@@ -1,0 +1,469 @@
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
+const ffmpeg = require('fluent-ffmpeg');
+const db = require('./database');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+app.use(cors());
+app.use(express.json());
+
+// Ensure upload directories exist
+const uploadsDir = path.join(__dirname, 'uploads');
+const videosDir = path.join(uploadsDir, 'videos');
+const dubsDir = path.join(uploadsDir, 'dubs');
+const exportsDir = path.join(uploadsDir, 'exports');
+
+[uploadsDir, videosDir, dubsDir, exportsDir].forEach(dir => {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+});
+
+// Serve static uploaded files
+app.use('/uploads', express.static(uploadsDir));
+
+// Configure Multer for video and audio file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    if (file.fieldname === 'video') cb(null, videosDir);
+    else if (file.fieldname === 'audio') cb(null, dubsDir);
+    else cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || (file.fieldname === 'audio' ? '.webm' : '.mp4');
+    cb(null, `${uuidv4()}${ext}`);
+  }
+});
+
+const upload = multer({ storage });
+
+// =======================
+// API Endpoints
+// =======================
+
+// 1. Get all video clips
+app.get('/api/clips', (req, res) => {
+  try {
+    const clips = db.prepare(`
+      SELECT c.*, COUNT(d.id) as dub_count 
+      FROM clips c 
+      LEFT JOIN dubs d ON c.id = d.clip_id 
+      GROUP BY c.id 
+      ORDER BY c.created_at DESC
+    `).all();
+
+    const formattedClips = clips.map(c => ({
+      ...c,
+      tags: JSON.parse(c.tags || '[]'),
+      original_url: c.original_url
+    }));
+
+    res.json(formattedClips);
+  } catch (error) {
+    console.error('Error fetching clips:', error);
+    res.status(500).json({ error: 'Failed to fetch video clips.' });
+  }
+});
+
+// 2. Get single clip by ID with its dubs and reactions
+app.get('/api/clips/:id', (req, res) => {
+  try {
+    const clip = db.prepare('SELECT * FROM clips WHERE id = ?').get(req.params.id);
+    if (!clip) return res.status(404).json({ error: 'Clip not found.' });
+
+    clip.tags = JSON.parse(clip.tags || '[]');
+    // clip.original_url is already relative (/uploads/...)
+
+    // Fetch dubs for this clip
+    const dubs = db.prepare('SELECT * FROM dubs WHERE clip_id = ? ORDER BY created_at DESC').all(clip.id);
+
+    // For each dub, attach its reaction vote counts
+    const dubsWithReactions = dubs.map(d => {
+      const reactions = db.prepare('SELECT reaction_type, count FROM reactions WHERE dub_id = ?').all(d.id);
+      const reactionMap = { award: 0, funny: 0, spot_on: 0, cursed: 0 };
+      reactions.forEach(r => {
+        reactionMap[r.reaction_type] = r.count;
+      });
+
+      return {
+        ...d,
+        audio_url: d.audio_url,
+        reactions: reactionMap
+      };
+    });
+
+    res.json({ ...clip, dubs: dubsWithReactions });
+  } catch (error) {
+    console.error('Error fetching clip details:', error);
+    res.status(500).json({ error: 'Failed to fetch clip details.' });
+  }
+});
+
+// 3. Upload a new video clip
+app.post('/api/clips', upload.single('video'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No video file provided.' });
+
+    const id = uuidv4();
+    const title = req.body.title || 'Untitled Clip';
+    const category = req.body.category || 'General';
+    const tags = req.body.tags ? JSON.stringify(req.body.tags.split(',').map(t => t.trim()).filter(Boolean)) : '[]';
+    const script_cues = req.body.script_cues || '00:01 - Character A: (Gasps) What is that?!\n00:03 - Character B: It looks like an ancient gaming console!';
+    const filename = req.file.filename;
+    const original_url = `/uploads/videos/${filename}`;
+    const created_at = new Date().toISOString();
+
+    db.prepare(`
+      INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, title, category, tags, filename, original_url, script_cues, created_at);
+
+    res.status(201).json({
+      id,
+      title,
+      category,
+      tags: JSON.parse(tags),
+      filename,
+      original_url,
+      script_cues,
+      created_at,
+      dub_count: 0
+    });
+  } catch (error) {
+    console.error('Error uploading clip:', error);
+    res.status(500).json({ error: 'Failed to save video clip.' });
+  }
+});
+
+// 3.5. Import video directly from YouTube link using yt-dlp
+app.post('/api/clips/youtube', (req, res) => {
+  try {
+    const { url, title, category, tags, script_cues } = req.body;
+    if (!url || (!url.includes('youtube.com') && !url.includes('youtu.be') && !url.includes('http'))) {
+      return res.status(400).json({ error: 'Please provide a valid YouTube video or short URL.' });
+    }
+
+    const id = uuidv4();
+    const filename = `${id}.mp4`;
+    const targetPath = path.join(videosDir, filename);
+    const venvYtDlp = path.join(__dirname, 'venv', 'bin', 'yt-dlp');
+    const ytDlpPath = fs.existsSync(venvYtDlp) ? venvYtDlp : 'yt-dlp';
+
+    // Download best mp4 video under 720p with mixed audio, and print video title after download finishes
+    const args = [
+      '--print', 'after_move:%(title)s',
+      '--no-simulate',
+      '--js-runtimes', 'node',
+      '-f', 'best[height<=720]/best',
+      '--recode-video', 'mp4',
+      '-o', targetPath,
+      url
+    ];
+    
+    require('child_process').execFile(ytDlpPath, args, { timeout: 180000 }, (err, stdout, stderr) => {
+      if (err) {
+        console.error('yt-dlp download error:', err, stderr);
+        return res.status(500).json({ error: 'Failed to download YouTube video. Make sure the link is a valid public video or short!' });
+      }
+
+      try {
+        const extractedTitle = stdout ? stdout.trim().split('\n')[0] : 'Imported YouTube Clip';
+        const finalTitle = title && title.trim() !== '' ? title.trim() : (extractedTitle || 'Imported YouTube Clip');
+        const finalCategory = category || 'General';
+        const parsedTags = tags ? JSON.stringify(typeof tags === 'string' ? tags.split(',').map(t => t.trim()).filter(Boolean) : tags) : '["YouTube"]';
+        const finalCues = script_cues || '00:01 - Character A: (Speaking YouTube line...)\n00:05 - Character B: (Replying in custom voice...)';
+        const original_url = `/uploads/videos/${filename}`;
+        const created_at = new Date().toISOString();
+
+        db.prepare(`
+          INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, finalTitle, finalCategory, parsedTags, filename, original_url, finalCues, created_at);
+
+        res.status(201).json({
+          id,
+          title: finalTitle,
+          category: finalCategory,
+          tags: JSON.parse(parsedTags),
+          filename,
+          original_url,
+          script_cues: finalCues,
+          created_at,
+          dub_count: 0
+        });
+      } catch (dbErr) {
+        console.error('Database save error after yt-dlp:', dbErr);
+        res.status(500).json({ error: 'Failed to save downloaded clip metadata to database.' });
+      }
+    });
+
+  } catch (error) {
+    console.error('YouTube import route error:', error);
+    res.status(500).json({ error: 'Failed to initiate YouTube download job.' });
+  }
+});
+
+// 4. Update dialogue teleprompter script for a clip
+app.put('/api/clips/:id/script', (req, res) => {
+  try {
+    const { script_cues } = req.body;
+    db.prepare('UPDATE clips SET script_cues = ? WHERE id = ?').run(script_cues || '', req.params.id);
+    res.json({ success: true, script_cues });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update script cues.' });
+  }
+});
+
+// 4.5. Crop / Trim a video clip by timestamps or aspect ratio using ffmpeg
+app.post('/api/clips/:id/crop', (req, res) => {
+  try {
+    const clip = db.prepare('SELECT * FROM clips WHERE id = ?').get(req.params.id);
+    if (!clip) return res.status(404).json({ error: 'Source clip not found in database.' });
+
+    const sourcePath = path.join(videosDir, clip.filename);
+    if (!fs.existsSync(sourcePath)) {
+      return res.status(404).json({ error: 'Source video file missing on disk.' });
+    }
+
+    const { start_time, end_time, crop_ratio, title } = req.body;
+    const newId = uuidv4();
+    const newFilename = `${newId}.mp4`;
+    const outputPath = path.join(videosDir, newFilename);
+
+    let filterOpts = '';
+    if (crop_ratio === '9:16') filterOpts = ' -vf "crop=in_h*9/16:in_h"';
+    else if (crop_ratio === '1:1') filterOpts = ' -vf "crop=in_h:in_h"';
+    else if (crop_ratio === '16:9') filterOpts = ' -vf "crop=in_w:in_w*9/16"';
+
+    // Place -ss and -to after -i so timestamps align exactly with video playback controls
+    let timeOpts = '';
+    if (start_time !== undefined && start_time !== '' && parseFloat(start_time) > 0) {
+      timeOpts += ` -ss "${start_time}"`;
+    }
+    if (end_time !== undefined && end_time !== '' && parseFloat(end_time) > 0) {
+      timeOpts += ` -to "${end_time}"`;
+    }
+
+    const cmd = `ffmpeg -i "${sourcePath}"${timeOpts}${filterOpts} -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k -y "${outputPath}"`;
+
+    require('child_process').exec(cmd, { timeout: 120000 }, (err, stdout, stderr) => {
+      if (err) {
+        console.error('ffmpeg crop error:', err, stderr);
+        return res.status(500).json({ error: 'Failed to crop video file. Check timestamp values.' });
+      }
+
+      try {
+        let existingTags = [];
+        try { existingTags = JSON.parse(clip.tags || '[]'); } catch (e) {}
+        if (!existingTags.includes('Cropped')) existingTags.push('Cropped');
+
+        const newTitle = (title && title.trim()) || `${clip.title} (Cropped)`;
+        const newTags = JSON.stringify(existingTags);
+        const original_url = `/uploads/videos/${newFilename}`;
+        const created_at = new Date().toISOString();
+
+        db.prepare(`
+          INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(newId, newTitle, clip.category, newTags, newFilename, original_url, clip.script_cues, created_at);
+
+        res.status(201).json({
+          id: newId,
+          title: newTitle,
+          category: clip.category,
+          tags: existingTags,
+          filename: newFilename,
+          original_url,
+          script_cues: clip.script_cues,
+          created_at,
+          dub_count: 0
+        });
+      } catch (dbErr) {
+        console.error('Database insertion error for cropped clip:', dbErr);
+        res.status(500).json({ error: 'Failed to record cropped clip in database.' });
+      }
+    });
+  } catch (error) {
+    console.error('Crop endpoint error:', error);
+    res.status(500).json({ error: 'Failed to initialize crop command.' });
+  }
+});
+
+// 5. Upload a recorded dub for a clip
+app.post('/api/clips/:id/dubs', upload.single('audio'), (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No audio recording provided.' });
+
+    const clip = db.prepare('SELECT id FROM clips WHERE id = ?').get(req.params.id);
+    if (!clip) return res.status(404).json({ error: 'Target clip not found.' });
+
+    const id = uuidv4();
+    const title = req.body.title || 'My Ultimate Dub';
+    const author = req.body.author || 'Anonymous Dubber';
+    const mix_volume = req.body.mix_volume !== undefined ? parseFloat(req.body.mix_volume) : 0.2;
+    const audio_filename = req.file.filename;
+    const audio_url = `/uploads/dubs/${audio_filename}`;
+    const created_at = new Date().toISOString();
+
+    db.prepare(`
+      INSERT INTO dubs (id, clip_id, title, author, audio_filename, audio_url, mix_volume, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, clip.id, title, author, audio_filename, audio_url, mix_volume, created_at);
+
+    // Initialize default reaction votes for the dub
+    ['award', 'funny', 'spot_on', 'cursed'].forEach(type => {
+      db.prepare('INSERT INTO reactions (dub_id, reaction_type, count) VALUES (?, ?, 0)').run(id, type);
+    });
+
+    res.status(201).json({
+      id,
+      clip_id: clip.id,
+      title,
+      author,
+      audio_url,
+      mix_volume,
+      created_at,
+      reactions: { award: 0, funny: 0, spot_on: 0, cursed: 0 }
+    });
+  } catch (error) {
+    console.error('Error saving voice dub:', error);
+    res.status(500).json({ error: 'Failed to save voice dub.' });
+  }
+});
+
+// 6. Vote / React to a dub
+app.post('/api/dubs/:id/vote', (req, res) => {
+  try {
+    const { reaction } = req.body;
+    if (!['award', 'funny', 'spot_on', 'cursed'].includes(reaction)) {
+      return res.status(400).json({ error: 'Invalid reaction type.' });
+    }
+
+    const existing = db.prepare('SELECT count FROM reactions WHERE dub_id = ? AND reaction_type = ?').get(req.params.id, reaction);
+    if (existing !== undefined) {
+      db.prepare('UPDATE reactions SET count = count + 1 WHERE dub_id = ? AND reaction_type = ?').run(req.params.id, reaction);
+    } else {
+      db.prepare('INSERT INTO reactions (dub_id, reaction_type, count) VALUES (?, ?, 1)').run(req.params.id, reaction);
+    }
+
+    const updated = db.prepare('SELECT count FROM reactions WHERE dub_id = ? AND reaction_type = ?').get(req.params.id, reaction);
+    res.json({ success: true, count: updated ? updated.count : 1 });
+  } catch (error) {
+    console.error('Error recording vote:', error);
+    res.status(500).json({ error: 'Failed to record vote.' });
+  }
+});
+
+// 7. Export mixed video MP4 using fluent-ffmpeg
+app.post('/api/dubs/:id/export', (req, res) => {
+  try {
+    const dub = db.prepare('SELECT d.*, c.filename as clip_filename FROM dubs d JOIN clips c ON d.clip_id = c.id WHERE d.id = ?').get(req.params.id);
+    if (!dub) return res.status(404).json({ error: 'Dub not found.' });
+
+    const videoPath = path.join(videosDir, dub.clip_filename);
+    const audioPath = path.join(dubsDir, dub.audio_filename);
+    const exportFilename = `export_${dub.id}.mp4`;
+    const exportPath = path.join(exportsDir, exportFilename);
+
+    if (!fs.existsSync(videoPath) || !fs.existsSync(audioPath)) {
+      return res.status(404).json({ error: 'Source media files missing on server.' });
+    }
+
+    // If export already exists, return it immediately!
+    if (fs.existsSync(exportPath)) {
+      return res.json({ download_url: `/uploads/exports/${exportFilename}` });
+    }
+
+    const mixVol = dub.mix_volume !== undefined ? dub.mix_volume : 0.2;
+
+    // Use ffmpeg to mix original video's audio at mixVol and recorded audio at full volume
+    ffmpeg()
+      .input(videoPath)
+      .input(audioPath)
+      .complexFilter([
+        `[0:a]volume=${mixVol}[original_a];[1:a]volume=1.0[dub_a];[original_a][dub_a]amix=inputs=2:duration=first:dropout_transition=2[a_out]`
+      ])
+      .outputOptions([
+        '-c:v copy',              // Copy video stream directly for instant processing!
+        '-map 0:v:0',             // Map original video stream
+        '-map [a_out]',           // Map mixed audio stream
+        '-c:a aac',               // Encode mixed audio to AAC for MP4 compatibility
+        '-shortest'
+      ])
+      .on('end', () => {
+        res.json({ download_url: `/uploads/exports/${exportFilename}` });
+      })
+      .on('error', (err) => {
+        console.error('ffmpeg export error:', err);
+        res.status(500).json({ error: 'Failed to process MP4 export video.' });
+      })
+      .save(exportPath);
+
+  } catch (error) {
+    console.error('Export error:', error);
+    res.status(500).json({ error: 'Failed to initialize export job.' });
+  }
+});
+
+// 8. Seed Demo Clip endpoint (Generates a sci-fi countdown animation video using ffmpeg!)
+app.post('/api/seed-demo', (req, res) => {
+  try {
+    const demoFilename = 'demo_sci_fi.mp4';
+    const videoPath = path.join(videosDir, demoFilename);
+
+    // Check if Demo clip already exists in DB
+    const existing = db.prepare('SELECT * FROM clips WHERE filename = ?').get(demoFilename);
+    if (existing) {
+      return res.json({ message: 'Demo clip already ready in vault!', clip_id: existing.id });
+    }
+
+    const id = uuidv4();
+    const title = 'Cyberpunk Neon Broadcast (Demo)';
+    const category = 'Sci-Fi / Demo';
+    const tags = JSON.stringify(['Cyberpunk', 'Demo', 'Sci-Fi', 'Countdown']);
+    const script_cues = `00:01 - AI Overlord: ALERT. Unauthorized frequency detected in Sector 7.\n00:03 - Rebel Hacker: Relax, computer! We're just firing up VoiceDub Arena!\n00:06 - AI Overlord: Warning! Dubbing protocol initiated! Volume exceeding maximum parameters!`;
+    const original_url = `/uploads/videos/${demoFilename}`;
+    const created_at = new Date().toISOString();
+
+    // Generate a vibrant test pattern video with synthesizer audio tones via ffmpeg
+    const cmd = `ffmpeg -f lavfi -i testsrc=size=1280x720:rate=30 -f lavfi -i sine=frequency=440:beep_factor=4 -t 8 -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 128k -y "${videoPath}"`;
+    require('child_process').exec(cmd, (err) => {
+      if (err) {
+        console.error('Error generating demo video:', err);
+        return res.status(500).json({ error: 'Failed to generate demo video clip.' });
+      }
+      try {
+        db.prepare(`
+          INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(id, title, category, tags, demoFilename, original_url, script_cues, created_at);
+        res.json({ success: true, message: 'Generated demo animation clip!', clip_id: id });
+      } catch (dbErr) {
+        console.error('Database insertion error:', dbErr);
+        res.status(500).json({ error: 'Failed to record clip in db.' });
+      }
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to seed demo.' });
+  }
+});
+
+// Serve static frontend build in production
+const clientDist = path.join(__dirname, '../client/dist');
+if (fs.existsSync(clientDist)) {
+  app.use(express.static(clientDist));
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
+      res.sendFile(path.join(clientDist, 'index.html'));
+    }
+  });
+}
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🎤 VoiceDub Arena API Server listening on port ${PORT}`);
+});

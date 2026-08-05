@@ -1,0 +1,12 @@
+node_modules
+client/node_modules
+server/node_modules
+client/dist
+server/venv
+server/uploads
+server/data/*.db
+server/data/*.db-journal
+.git
+.gitignore
+*.log
+.DS_Store

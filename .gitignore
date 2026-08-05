@@ -1,0 +1,27 @@
+# Dependency directories
+node_modules/
+client/node_modules/
+server/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python virtual environment
+venv/
+server/venv/
+__pycache__/
+
+# Local database and uploads
+server/uploads/*
+!server/uploads/.gitkeep
+server/data/*.db
+server/data/*.db-journal
+
+# Build outputs
+dist/
+client/dist/
+
+# OS metadata
+.DS_Store
+Thumbs.db
