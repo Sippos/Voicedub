@@ -457,9 +457,12 @@ app.post('/api/seed-demo', (req, res) => {
 const clientDist = path.join(__dirname, '../client/dist');
 if (fs.existsSync(clientDist)) {
   app.use(express.static(clientDist));
-  app.get('*', (req, res) => {
+  // Catch-all fallback handler (compatible with Express 5 path routing)
+  app.use((req, res) => {
     if (!req.path.startsWith('/api') && !req.path.startsWith('/uploads')) {
       res.sendFile(path.join(clientDist, 'index.html'));
+    } else {
+      res.status(404).json({ error: 'Endpoint or media resource not found on server.' });
     }
   });
 }
