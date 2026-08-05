@@ -546,9 +546,6 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
                     required={uploadTab === 'youtube'}
                     disabled={uploading}
                   />
-                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                    💡 Server will download the high-res video via yt-dlp and auto-detect title if left blank below!
-                  </span>
                 </div>
               )}
 
@@ -567,42 +564,18 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div className="input-group">
-                  <label className="input-label">Category</label>
-                  <select 
-                    className="select-field" 
-                    value={category} 
-                    onChange={(e) => setCategory(e.target.value)}
-                    disabled={uploading}
-                  >
-                    {categories.filter(c => c !== 'All').map(c => (
-                      <option key={c} value={c} style={{ background: '#140f26', color: '#fff' }}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Tags (comma separated)</label>
-                  <input 
-                    type="text" 
-                    className="input-field" 
-                    placeholder="starwars, battle, emotional" 
-                    value={tags}
-                    onChange={(e) => setTags(e.target.value)}
-                    disabled={uploading}
-                  />
-                </div>
-              </div>
-
               <div className="input-group">
-                <label className="input-label">Dialogue Teleprompter Cues & Notes</label>
-                <textarea 
-                  className="textarea-field" 
-                  placeholder="Add timestamp cues so actors can read lines easily while dubbing!"
-                  value={scriptCues}
-                  onChange={(e) => setScriptCues(e.target.value)}
+                <label className="input-label">Category</label>
+                <select 
+                  className="select-field" 
+                  value={category} 
+                  onChange={(e) => setCategory(e.target.value)}
                   disabled={uploading}
-                />
+                >
+                  {categories.filter(c => c !== 'All').map(c => (
+                    <option key={c} value={c} style={{ background: '#140f26', color: '#fff' }}>{c}</option>
+                  ))}
+                </select>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
