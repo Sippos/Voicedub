@@ -1,29 +1,25 @@
-FROM node:20-bookworm
+FROM node:22-bookworm-slim
 
-# Install Python 3, pip, venv, build tools, and FFmpeg for media processing & SQLite native compiling
+# Install Python 3, venv, pip, and FFmpeg for media processing & YouTube imports
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-venv \
-    build-essential \
-    sqlite3 \
-    libsqlite3-dev \
     ffmpeg \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy dependency configs
+# Copy dependency configs first
 COPY package*.json ./
 COPY client/package*.json ./client/
 COPY server/package*.json ./server/
 
-# Install Node dependencies and cleanly rebuild better-sqlite3 for container architecture to prevent SIGSEGV (139)
+# Install pure Node dependencies (no native C++ compilation needed!)
 RUN npm install && \
     cd client && npm install && \
-    cd ../server && npm install && \
-    npm rebuild better-sqlite3 --build-from-source
+    cd ../server && npm install
 
 # Copy application source code
 COPY . .
@@ -46,5 +42,5 @@ ENV NODE_ENV=production
 
 EXPOSE $PORT
 
-# Run Express server (which serves both API and static UI)
+# Run Express server (uses Node 22 built-in node:sqlite)
 CMD ["node", "server/server.js"]

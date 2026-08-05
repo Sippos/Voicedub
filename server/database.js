@@ -1,4 +1,4 @@
-const Database = require('better-sqlite3');
+const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');
 
@@ -7,7 +7,7 @@ if (!fs.existsSync(dataDir)) {
   fs.mkdirSync(dataDir, { recursive: true });
 }
 
-const db = new Database(path.join(dataDir, 'voicedub.sqlite'));
+const db = new DatabaseSync(path.join(dataDir, 'voicedub.sqlite'));
 
 // Initialize database schema
 db.exec(`
