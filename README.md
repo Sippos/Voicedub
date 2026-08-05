@@ -1,6 +1,6 @@
-# VoiceDub Arena 🎙️🏆 (Choicer Voicer Clone)
+# VoiceDub Arena 🎙️🏆 
 
-Welcome to **VoiceDub Arena**, a vibrant collaborative web application inspired by the itch.io indie hit *"The Choicer Voicer"*. This social platform lets you and your friends upload video scenes, enter a digital recording booth to voice over them in real-time, audition synchronized multi-takes with customizable background sound mixing, and showcase performances in a community voting showroom!
+Welcome to **VoiceDub Arena**. This social platform lets you and your friends upload video scenes, enter a digital recording booth to voice over them in real-time, audition synchronized multi-takes with customizable background sound mixing, and showcase performances in a community voting showroom!
 
 ---
 
