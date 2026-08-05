@@ -17,6 +17,7 @@ server/uploads/*
 !server/uploads/.gitkeep
 server/data/*.db
 server/data/*.db-journal
+server/data/*.sqlite
 
 # Build outputs
 dist/

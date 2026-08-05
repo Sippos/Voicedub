@@ -6,6 +6,9 @@ server/venv
 server/uploads
 server/data/*.db
 server/data/*.db-journal
+server/data/*.sqlite
+server/data/*
+!server/data/.gitkeep
 .git
 .gitignore
 *.log
