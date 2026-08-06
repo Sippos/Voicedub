@@ -11,6 +11,17 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
   const [uploading, setUploading] = useState(false);
   const [processingCrop, setProcessingCrop] = useState(false);
 
+  // Modal Tab ('file' or 'youtube')
+  const [uploadTab, setUploadTab] = useState('file');
+
+  // Upload Form states
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('Anime');
+  const [tags, setTags] = useState('');
+  const [scriptCues, setScriptCues] = useState('00:01 - Character A: (Speaking line...)\n00:04 - Character B: (Response line...)');
+  const [file, setFile] = useState(null);
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+
   // Cookie Auth state for Cloud Server Deployment
   const [cookiesConfigured, setCookiesConfigured] = useState(false);
   const [showCookieAuth, setShowCookieAuth] = useState(false);
@@ -62,17 +73,6 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
       setSavingCookies(false);
     }
   };
-
-  // Modal Tab ('file' or 'youtube')
-  const [uploadTab, setUploadTab] = useState('file');
-
-  // Upload Form states
-  const [title, setTitle] = useState('');
-  const [category, setCategory] = useState('Anime');
-  const [tags, setTags] = useState('');
-  const [scriptCues, setScriptCues] = useState('00:01 - Character A: (Speaking line...)\n00:04 - Character B: (Response line...)');
-  const [file, setFile] = useState(null);
-  const [youtubeUrl, setYoutubeUrl] = useState('');
 
   // Crop Form states
   const [cropStartTime, setCropStartTime] = useState('');
