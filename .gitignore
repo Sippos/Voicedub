@@ -12,12 +12,15 @@ venv/
 server/venv/
 __pycache__/
 
-# Local database and uploads
+# Local database, uploads, and authentication cookies
 server/uploads/*
 !server/uploads/.gitkeep
-server/data/*.db
-server/data/*.db-journal
-server/data/*.sqlite
+server/data/*
+!server/data/.gitkeep
+*.txt
+*cookies*
+.env
+.env.*
 
 # Build outputs
 dist/

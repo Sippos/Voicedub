@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { Upload, Film, Mic, Trophy, Plus, X, Search, Tag, Video, FileVideo, Loader2, Scissors, Clock, Sliders } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Upload, Film, Mic, Trophy, Plus, X, Search, Tag, Video, FileVideo, Loader2, Scissors, Clock, Sliders, ShieldAlert, ShieldCheck, Key } from 'lucide-react';
 
 export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroom, onClipUploaded }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -10,6 +10,58 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [uploading, setUploading] = useState(false);
   const [processingCrop, setProcessingCrop] = useState(false);
+
+  // Cookie Auth state for Cloud Server Deployment
+  const [cookiesConfigured, setCookiesConfigured] = useState(false);
+  const [showCookieAuth, setShowCookieAuth] = useState(false);
+  const [cookiesText, setCookiesText] = useState('');
+  const [savingCookies, setSavingCookies] = useState(false);
+
+  useEffect(() => {
+    if (showUploadModal) {
+      fetch('/api/youtube/cookies-status')
+        .then(r => r.json())
+        .then(data => setCookiesConfigured(data.configured))
+        .catch(() => setCookiesConfigured(false));
+    }
+  }, [showUploadModal, uploadTab]);
+
+  const handleCookieFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => setCookiesText(event.target.result);
+      reader.readAsText(file);
+    }
+  };
+
+  const handleSaveCookies = async () => {
+    if (!cookiesText || cookiesText.trim().length < 10) {
+      alert('Please provide a valid Netscape format cookies.txt string or file.');
+      return;
+    }
+    setSavingCookies(true);
+    try {
+      const res = await fetch('/api/youtube/cookies', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cookies: cookiesText })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setCookiesConfigured(true);
+        alert('✅ YouTube authentication cookies saved to deployed server storage!');
+        setShowCookieAuth(false);
+        setCookiesText('');
+      } else {
+        alert(data.error || 'Failed to save cookies on server.');
+      }
+    } catch (err) {
+      alert('Error connecting to server to save cookies.');
+    } finally {
+      setSavingCookies(false);
+    }
+  };
 
   // Modal Tab ('file' or 'youtube')
   const [uploadTab, setUploadTab] = useState('file');
@@ -138,7 +190,8 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
             title: title,
             category,
             tags,
-            script_cues: scriptCues
+            script_cues: scriptCues,
+            cookies: cookiesText.trim() ? cookiesText : undefined
           })
         });
       }
@@ -546,6 +599,94 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
                     required={uploadTab === 'youtube'}
                     disabled={uploading}
                   />
+
+                  {/* Cloud Server Deployed IP Cookie Authentication Bypass Accordion */}
+                  <div style={{
+                    background: cookiesConfigured ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
+                    border: cookiesConfigured ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                    borderRadius: '10px',
+                    padding: '14px 16px',
+                    marginTop: '12px',
+                    marginBottom: '10px'
+                  }}>
+                    <div 
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
+                      onClick={() => setShowCookieAuth(!showCookieAuth)}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '0.88rem', color: cookiesConfigured ? '#10B981' : '#ff7a7a' }}>
+                        {cookiesConfigured ? <ShieldCheck size={18} color="#10B981" /> : <ShieldAlert size={18} color="#ff4d4d" />}
+                        <span>Cloud Bot Protection & Cookies: {cookiesConfigured ? 'Active on Server ✅' : 'Optional / Bypass Cloud Bot Blocker 🍪'}</span>
+                      </div>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        {showCookieAuth ? '▲ Hide Settings' : '▼ Configure Cookies'}
+                      </span>
+                    </div>
+                    
+                    {showCookieAuth && (
+                      <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.1)', fontSize: '0.85rem', color: '#ccc' }}>
+                        <p style={{ margin: '0 0 10px 0', lineHeight: 1.5, color: '#e2e8f0' }}>
+                          <strong>Why is this needed on deployed websites?</strong> Cloud datacenters (Render, Heroku, AWS) have IP ranges that YouTube frequently blocks with anti-bot verifications (<em>"Sign in to confirm you’re not a bot"</em>). Providing cookies authenticates the server!
+                        </p>
+                        <div style={{ background: 'rgba(0, 0, 0, 0.35)', padding: '10px 12px', borderRadius: '8px', marginBottom: '12px', borderLeft: '3px solid #ff4d4d' }}>
+                          <p style={{ margin: '0 0 6px 0', fontWeight: 600, color: '#ff7a7a' }}>🚀 How to easily pass cookies to your server:</p>
+                          <ol style={{ margin: '0', paddingLeft: '20px', lineHeight: 1.6 }}>
+                            <li>While signed into YouTube in Chrome or Firefox, install an extension like <strong>"Get cookies.txt LOCALLY"</strong>.</li>
+                            <li>Export your YouTube cookies as a <code>cookies.txt</code> file.</li>
+                            <li>Upload the file below or paste the contents directly!</li>
+                          </ol>
+                          <p style={{ margin: '8px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                            <em>💡 Render Alternative: Paste the contents of your cookies.txt directly into a <code>YOUTUBE_COOKIES</code> Environment Variable in your Render app dashboard!</em>
+                          </p>
+                        </div>
+
+                        <div style={{ marginBottom: '12px' }}>
+                          <label className="input-label" style={{ fontSize: '0.8rem', color: 'var(--accent-mint)' }}>
+                            📁 Upload cookies.txt file:
+                          </label>
+                          <input 
+                            type="file" 
+                            accept=".txt" 
+                            onChange={handleCookieFileUpload} 
+                            style={{ fontSize: '0.8rem', marginTop: '4px', display: 'block', width: '100%', color: '#fff' }}
+                          />
+                        </div>
+
+                        <div style={{ marginBottom: '12px' }}>
+                          <label className="input-label" style={{ fontSize: '0.8rem', color: 'var(--accent-mint)' }}>
+                            📋 Or paste cookies.txt content below:
+                          </label>
+                          <textarea 
+                            value={cookiesText}
+                            onChange={(e) => setCookiesText(e.target.value)}
+                            placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	1791234567	GPS	1..."
+                            rows={4}
+                            className="input-field"
+                            style={{ fontFamily: 'monospace', fontSize: '0.75rem', width: '100%', resize: 'vertical' }}
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleSaveCookies}
+                          disabled={savingCookies || !cookiesText.trim()}
+                          className="btn"
+                          style={{ 
+                            background: !cookiesText.trim() ? 'rgba(255,255,255,0.1)' : '#10B981', 
+                            color: '#fff', 
+                            padding: '8px 16px', 
+                            fontSize: '0.85rem',
+                            cursor: !cookiesText.trim() ? 'not-allowed' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px'
+                          }}
+                        >
+                          {savingCookies ? <Loader2 size={16} className="animate-spin" /> : <Key size={16} />}
+                          Save Authentication Cookies to Server Storage
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
 

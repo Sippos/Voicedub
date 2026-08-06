@@ -139,10 +139,83 @@ app.post('/api/clips', upload.single('video'), (req, res) => {
   }
 });
 
-// 3.5. Import video directly from YouTube link using yt-dlp
+// Helper to manage YouTube authentication cookies from environment variables or client submissions
+const getYouTubeCookiesPath = (customCookiesText) => {
+  const dataDir = path.join(__dirname, 'data');
+  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  
+  const targetCookiePath = path.join(dataDir, 'youtube_cookies.txt');
+  
+  // 1. If custom cookies text was passed directly from UI or endpoint, save it
+  if (customCookiesText && typeof customCookiesText === 'string' && customCookiesText.trim().length > 10) {
+    try {
+      const formatted = customCookiesText.replace(/\\n/g, '\n').trim();
+      fs.writeFileSync(targetCookiePath, formatted, 'utf8');
+      console.log('Updated YouTube cookies file from submitted user data.');
+    } catch (e) {
+      console.error('Failed to save submitted cookies:', e);
+    }
+  }
+  
+  // 2. If YOUTUBE_COOKIES, YT_COOKIES, or COOKIES_TXT environment variable exists on deployed server
+  const envCookies = process.env.YOUTUBE_COOKIES || process.env.YT_COOKIES || process.env.COOKIES_TXT;
+  if (envCookies && (!fs.existsSync(targetCookiePath) || fs.statSync(targetCookiePath).size === 0)) {
+    try {
+      const formatted = envCookies.replace(/\\n/g, '\n').trim();
+      fs.writeFileSync(targetCookiePath, formatted, 'utf8');
+      console.log('Initialized YouTube cookies file from environment variables.');
+    } catch (e) {
+      console.error('Failed to write environment cookies to file:', e);
+    }
+  }
+  
+  // 3. Check all standard cookie file locations on server
+  const possiblePaths = [
+    targetCookiePath,
+    path.join(__dirname, 'data', 'cookies.txt'),
+    path.join(__dirname, 'cookies.txt'),
+    '/app/server/data/cookies.txt',
+    '/app/cookies.txt',
+    '/data/cookies.txt'
+  ];
+  
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p) && fs.statSync(p).size > 10) {
+      return p;
+    }
+  }
+  return null;
+};
+
+// Check YouTube cookie configuration status on the server
+app.get('/api/youtube/cookies-status', (req, res) => {
+  try {
+    const cookiePath = getYouTubeCookiesPath();
+    res.json({ configured: !!cookiePath });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to inspect cookie status' });
+  }
+});
+
+// Update YouTube cookie configuration on the server directly from frontend UI
+app.post('/api/youtube/cookies', (req, res) => {
+  try {
+    const { cookies } = req.body;
+    if (!cookies || typeof cookies !== 'string' || cookies.trim().length < 10) {
+      return res.status(400).json({ error: 'Please paste a valid Netscape format cookies.txt string (must start with # Netscape HTTP Cookie File or contain cookie domain rows).' });
+    }
+    const cookiePath = getYouTubeCookiesPath(cookies);
+    res.json({ success: true, configured: !!cookiePath, message: 'YouTube authentication cookies successfully saved on server!' });
+  } catch (error) {
+    console.error('Error saving cookies:', error);
+    res.status(500).json({ error: 'Failed to save cookies on server.' });
+  }
+});
+
+// 3.5. Import video directly from YouTube link using yt-dlp with cookie authentication & resilient cloud fallback strategies
 app.post('/api/clips/youtube', (req, res) => {
   try {
-    const { url, title, category, tags, script_cues } = req.body;
+    const { url, title, category, tags, script_cues, cookies } = req.body;
     if (!url || (!url.includes('youtube.com') && !url.includes('youtu.be') && !url.includes('http'))) {
       return res.status(400).json({ error: 'Please provide a valid YouTube video or short URL.' });
     }
@@ -153,57 +226,137 @@ app.post('/api/clips/youtube', (req, res) => {
     const venvYtDlp = path.join(__dirname, 'venv', 'bin', 'yt-dlp');
     const ytDlpPath = fs.existsSync(venvYtDlp) ? venvYtDlp : 'yt-dlp';
 
-    // Download best mp4 video under 720p with mixed audio, and print video title after download finishes
-    const args = [
+    // Resolve cookie file path from request body, environment variables, or disk
+    const cookiePath = getYouTubeCookiesPath(cookies);
+    const proxyUrl = process.env.YOUTUBE_PROXY || process.env.YT_PROXY || null;
+
+    const baseArgs = [
       '--print', 'after_move:%(title)s',
       '--no-simulate',
-      '--js-runtimes', 'node',
-      '--extractor-args', 'youtube:player_client=android,ios,web',
       '--no-check-certificates',
       '--no-warnings',
       '-f', 'best[height<=720]/best',
       '--recode-video', 'mp4',
-      '-o', targetPath,
-      url
+      '-o', targetPath
     ];
-    
-    require('child_process').execFile(ytDlpPath, args, { timeout: 180000 }, (err, stdout, stderr) => {
-      if (err) {
-        console.error('yt-dlp download error:', err, stderr);
-        const detail = stderr ? stderr.split('\n').filter(l => l.includes('ERROR:') || l.includes('error:') || l.trim() !== '').slice(0, 2).join(' - ') : err.message;
-        return res.status(500).json({ error: `YouTube import failed on server: ${detail || 'Unknown yt-dlp execution error'}` });
+
+    if (proxyUrl) {
+      baseArgs.push('--proxy', proxyUrl);
+    }
+
+    // Intelligent multi-strategy fallback designed for deployed Cloud websites (Render, AWS, Heroku) & local devs
+    const strategies = [];
+
+    // 1. If YouTube cookies are configured on the server, prioritize cookie-authenticated downloads first
+    if (cookiePath) {
+      strategies.push([
+        '--cookies', cookiePath,
+        '--extractor-args', 'youtube:player_client=android,ios,web',
+        '--js-runtimes', 'node'
+      ]);
+      strategies.push([
+        '--cookies', cookiePath,
+        '--extractor-args', 'youtube:player_client=web,default'
+      ]);
+      strategies.push([
+        '--cookies', cookiePath,
+        '--extractor-args', 'youtube:player_client=mweb,android,ios'
+      ]);
+      strategies.push([
+        '--cookies', cookiePath
+      ]);
+    }
+
+    // 2. Mobile and standalone alternate player clients (often bypass datacenter IP bot checks without cookies)
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=android'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=mweb'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=ios'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=android,ios'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=tv,tv_embedded'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=ios,tv,mweb', '--js-runtimes', 'node'
+    ]);
+    strategies.push([
+      '--js-runtimes', 'node'
+    ]);
+
+    // 3. Local browser cookie extraction fallbacks (for developers running locally on Desktop)
+    strategies.push(['--cookies-from-browser', 'chromium']);
+    strategies.push(['--cookies-from-browser', 'chrome']);
+    strategies.push(['--cookies-from-browser', 'firefox']);
+    strategies.push(['--cookies-from-browser', 'brave']);
+    strategies.push(['--cookies-from-browser', 'edge']);
+
+    // 4. Default unconfigured attempt
+    strategies.push([]);
+
+    const runYtDlp = (strategyIndex = 0, lastError = null) => {
+      if (strategyIndex >= strategies.length) {
+        console.error('All yt-dlp download strategies failed. Last error:', lastError);
+        const advice = !cookiePath 
+          ? "YouTube bot verification triggered on cloud datacenter IP. Please click 'Advanced / Server Cookies 🍪' below to upload your YouTube cookies.txt file, or add a YOUTUBE_COOKIES environment variable in Render!"
+          : "Sign in authentication check failed. Your uploaded cookies may have expired—please export a fresh cookies.txt from a browser while logged into YouTube and upload it in 'Advanced / Server Cookies 🍪'.";
+        return res.status(500).json({ error: `YouTube import failed on deployed server: ${advice}`, details: lastError || 'Sign in required / bot check.' });
       }
 
-      try {
-        const extractedTitle = stdout ? stdout.trim().split('\n')[0] : 'Imported YouTube Clip';
-        const finalTitle = title && title.trim() !== '' ? title.trim() : (extractedTitle || 'Imported YouTube Clip');
-        const finalCategory = category || 'General';
-        const parsedTags = tags ? JSON.stringify(typeof tags === 'string' ? tags.split(',').map(t => t.trim()).filter(Boolean) : tags) : '["YouTube"]';
-        const finalCues = script_cues || '00:01 - Character A: (Speaking YouTube line...)\n00:05 - Character B: (Replying in custom voice...)';
-        const original_url = `/uploads/videos/${filename}`;
-        const created_at = new Date().toISOString();
+      const strategyArgs = [...strategies[strategyIndex], ...baseArgs, url];
+      console.log(`[yt-dlp] Attempt ${strategyIndex + 1}/${strategies.length} using strategy: ${strategies[strategyIndex].join(' ') || 'default'}`);
 
-        db.prepare(`
-          INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(id, finalTitle, finalCategory, parsedTags, filename, original_url, finalCues, created_at);
+      require('child_process').execFile(ytDlpPath, strategyArgs, { timeout: 180000 }, (err, stdout, stderr) => {
+        const fileExists = fs.existsSync(targetPath) && fs.statSync(targetPath).size > 1000;
+        
+        if (err || !fileExists) {
+          const detail = stderr ? stderr.split('\n').filter(l => l.includes('ERROR:') || l.includes('error:') || l.includes('Sign in') || l.includes('bot')).slice(0, 2).join(' - ') : (err && err.message);
+          console.warn(`[yt-dlp] Strategy ${strategyIndex + 1} failed: ${detail || 'No video generated'}`);
+          if (fs.existsSync(targetPath)) {
+            try { fs.unlinkSync(targetPath); } catch (e) {}
+          }
+          return runYtDlp(strategyIndex + 1, detail || (err && err.message));
+        }
 
-        res.status(201).json({
-          id,
-          title: finalTitle,
-          category: finalCategory,
-          tags: JSON.parse(parsedTags),
-          filename,
-          original_url,
-          script_cues: finalCues,
-          created_at,
-          dub_count: 0
-        });
-      } catch (dbErr) {
-        console.error('Database save error after yt-dlp:', dbErr);
-        res.status(500).json({ error: 'Failed to save downloaded clip metadata to database.' });
-      }
-    });
+        try {
+          const extractedTitle = stdout ? stdout.trim().split('\n')[0] : 'Imported YouTube Clip';
+          const finalTitle = title && title.trim() !== '' ? title.trim() : (extractedTitle || 'Imported YouTube Clip');
+          const finalCategory = category || 'General';
+          const parsedTags = tags ? JSON.stringify(typeof tags === 'string' ? tags.split(',').map(t => t.trim()).filter(Boolean) : tags) : '["YouTube"]';
+          const finalCues = script_cues || '00:01 - Character A: (Speaking YouTube line...)\n00:05 - Character B: (Replying in custom voice...)';
+          const original_url = `/uploads/videos/${filename}`;
+          const created_at = new Date().toISOString();
+
+          db.prepare(`
+            INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(id, finalTitle, finalCategory, parsedTags, filename, original_url, finalCues, created_at);
+
+          res.status(201).json({
+            id,
+            title: finalTitle,
+            category: finalCategory,
+            tags: JSON.parse(parsedTags),
+            filename,
+            original_url,
+            script_cues: finalCues,
+            created_at,
+            dub_count: 0
+          });
+        } catch (dbErr) {
+          console.error('Database save error after yt-dlp:', dbErr);
+          res.status(500).json({ error: 'Failed to save downloaded clip metadata to database.' });
+        }
+      });
+    };
+
+    runYtDlp(0);
 
   } catch (error) {
     console.error('YouTube import route error:', error);
