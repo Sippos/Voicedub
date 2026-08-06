@@ -165,6 +165,25 @@ const cleanAndFormatCookies = (rawText) => {
   // Normalize escaped line endings (\r\n, \n, \r) to actual linebreaks
   text = text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n').replace(/\r\n/g, '\n');
   
+  // Automatically convert raw browser HTTP Cookie header strings (semicolon separated key=value pairs) to Netscape format!
+  if (!text.includes('\t') && (text.includes('LOGIN_INFO=') || text.includes('HSID=') || text.includes('SID='))) {
+    console.log('🔄 [YouTube Cookies] Detected raw HTTP Cookie header string! Automatically converting to Netscape tab-delimited format...');
+    const cookiePairs = text.split(';');
+    const netscapeRows = ['# Netscape HTTP Cookie File', '# Auto-converted from HTTP Cookie header string for yt-dlp', ''];
+    const futureExpiry = Math.floor(Date.now() / 1000) + 31536000; // 1 year validity timestamp
+    
+    for (const pair of cookiePairs) {
+      const trimmed = pair.trim();
+      if (!trimmed) continue;
+      const eqIdx = trimmed.indexOf('=');
+      if (eqIdx === -1) continue;
+      const name = trimmed.substring(0, eqIdx).trim();
+      const val = trimmed.substring(eqIdx + 1).trim();
+      netscapeRows.push(`.youtube.com\tTRUE\t/\tTRUE\t${futureExpiry}\t${name}\t${val}`);
+    }
+    text = netscapeRows.join('\n');
+  }
+  
   // Ensure the mandatory Netscape header is present (yt-dlp will throw a syntax error without it)
   if (!text.startsWith('# Netscape HTTP Cookie File') && !text.startsWith('# HTTP Cookie File')) {
     text = `# Netscape HTTP Cookie File\n# Automated cookie configuration for VoiceDub Arena yt-dlp imports.\n\n${text}`;
