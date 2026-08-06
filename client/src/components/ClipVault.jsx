@@ -565,7 +565,7 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
                   <iframe
                     width="100%"
                     height="240"
-                    src={`https://www.youtube.com/embed/${getYouTubeId(youtubeUrl)}`}
+                    src={`https://www.youtube-nocookie.com/embed/${getYouTubeId(youtubeUrl)}`}
                     title="YouTube video player preview"
                     style={{ border: 'none', display: 'block' }}
                     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
