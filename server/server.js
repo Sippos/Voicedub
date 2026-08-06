@@ -139,33 +139,79 @@ app.post('/api/clips', upload.single('video'), (req, res) => {
   }
 });
 
+// Helper to clean, decode Base64, format, and validate Netscape HTTP cookie text
+const cleanAndFormatCookies = (rawText) => {
+  if (!rawText || typeof rawText !== 'string') return null;
+  let text = rawText.trim();
+  
+  // Strip surrounding single or double quotes (common when pasting into cloud environment dashboards or .env files)
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+  
+  // Automatically detect and decode Base64 strings (relying on Base64 eliminates all line break and formatting corruption in cloud env vars!)
+  if (!text.includes('.youtube.com') && !text.includes('.google.com') && !text.includes('# Netscape') && /^[a-zA-Z0-9+/=\s]+$/.test(text) && text.length > 50) {
+    try {
+      const decoded = Buffer.from(text, 'base64').toString('utf8');
+      if (decoded.includes('.youtube.com') || decoded.includes('.google.com') || decoded.includes('# Netscape')) {
+        console.log('✅ Successfully decoded Base64 encoded YouTube authentication cookies.');
+        text = decoded.trim();
+      }
+    } catch (e) {
+      // Ignore base64 decoding errors
+    }
+  }
+
+  // Normalize escaped line endings (\r\n, \n, \r) to actual linebreaks
+  text = text.replace(/\\r\\n/g, '\n').replace(/\\n/g, '\n').replace(/\\r/g, '\n').replace(/\r\n/g, '\n');
+  
+  // Ensure the mandatory Netscape header is present (yt-dlp will throw a syntax error without it)
+  if (!text.startsWith('# Netscape HTTP Cookie File') && !text.startsWith('# HTTP Cookie File')) {
+    text = `# Netscape HTTP Cookie File\n# Automated cookie configuration for VoiceDub Arena yt-dlp imports.\n\n${text}`;
+  }
+
+  return text;
+};
+
 // Helper to manage YouTube authentication cookies from environment variables or client submissions
 const getYouTubeCookiesPath = (customCookiesText) => {
   const dataDir = path.join(__dirname, 'data');
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   
   const targetCookiePath = path.join(dataDir, 'youtube_cookies.txt');
+  let newCookieContent = null;
+  let source = '';
   
-  // 1. If custom cookies text was passed directly from UI or endpoint, save it
+  // 1. If custom cookies text was passed directly from UI or endpoint, use it
   if (customCookiesText && typeof customCookiesText === 'string' && customCookiesText.trim().length > 10) {
-    try {
-      const formatted = customCookiesText.replace(/\\n/g, '\n').trim();
-      fs.writeFileSync(targetCookiePath, formatted, 'utf8');
-      console.log('Updated YouTube cookies file from submitted user data.');
-    } catch (e) {
-      console.error('Failed to save submitted cookies:', e);
+    newCookieContent = cleanAndFormatCookies(customCookiesText);
+    source = 'submitted user data';
+  } 
+  // 2. Otherwise check YOUTUBE_COOKIES, YT_COOKIES, or COOKIES_TXT environment variables on deployed server
+  else {
+    const envCookies = process.env.YOUTUBE_COOKIES || process.env.YT_COOKIES || process.env.COOKIES_TXT;
+    if (envCookies && envCookies.trim().length > 10) {
+      newCookieContent = cleanAndFormatCookies(envCookies);
+      source = 'environment variables';
     }
   }
-  
-  // 2. If YOUTUBE_COOKIES, YT_COOKIES, or COOKIES_TXT environment variable exists on deployed server
-  const envCookies = process.env.YOUTUBE_COOKIES || process.env.YT_COOKIES || process.env.COOKIES_TXT;
-  if (envCookies && (!fs.existsSync(targetCookiePath) || fs.statSync(targetCookiePath).size === 0)) {
+
+  // Write/update the cookie file whenever new content differs from existing disk content
+  if (newCookieContent) {
     try {
-      const formatted = envCookies.replace(/\\n/g, '\n').trim();
-      fs.writeFileSync(targetCookiePath, formatted, 'utf8');
-      console.log('Initialized YouTube cookies file from environment variables.');
+      let needsUpdate = true;
+      if (fs.existsSync(targetCookiePath)) {
+        const existingContent = fs.readFileSync(targetCookiePath, 'utf8');
+        if (existingContent === newCookieContent) {
+          needsUpdate = false;
+        }
+      }
+      if (needsUpdate) {
+        fs.writeFileSync(targetCookiePath, newCookieContent, 'utf8');
+        console.log(`🍪 [YouTube Cookies] Updated server cookies file from ${source}.`);
+      }
     } catch (e) {
-      console.error('Failed to write environment cookies to file:', e);
+      console.error(`Failed to write YouTube cookies to file from ${source}:`, e);
     }
   }
   
@@ -248,26 +294,47 @@ app.post('/api/clips/youtube', (req, res) => {
     const strategies = [];
 
     // 1. If YouTube cookies are configured on the server, prioritize cookie-authenticated downloads first
+    // Note: On cloud datacenter IPs (like Render), using standard 'web' player client with desktop browser cookies can trigger instant anti-bot flags due to IP mismatch. We prioritize TV, VR & iOS clients when using cookies!
     if (cookiePath) {
       strategies.push([
         '--cookies', cookiePath,
-        '--extractor-args', 'youtube:player_client=android,ios,web',
+        '--extractor-args', 'youtube:player_client=ios,tv,android_vr',
         '--js-runtimes', 'node'
       ]);
       strategies.push([
         '--cookies', cookiePath,
-        '--extractor-args', 'youtube:player_client=web,default'
+        '--extractor-args', 'youtube:player_client=tv,tv_embedded,android_vr'
       ]);
       strategies.push([
         '--cookies', cookiePath,
-        '--extractor-args', 'youtube:player_client=mweb,android,ios'
+        '--extractor-args', 'youtube:player_client=android,ios'
+      ]);
+      strategies.push([
+        '--cookies', cookiePath,
+        '--extractor-args', 'youtube:player_client=web,default',
+        '--js-runtimes', 'node'
       ]);
       strategies.push([
         '--cookies', cookiePath
       ]);
     }
 
-    // 2. Mobile and standalone alternate player clients (often bypass datacenter IP bot checks without cookies)
+    // 2. Dedicated embedded player clients (CRITICAL FOR DATACENTER IPS: Smart TV, TV Embedded & Android VR clients do not require JavaScript bot verification or PoToken challenges, often bypassing cloud datacenter blocks even without cookies!)
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=tv,tv_embedded,android_vr'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=ios,tv,mweb', '--js-runtimes', 'node'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=tv,tv_embedded'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=android_vr,tv'
+    ]);
+    strategies.push([
+      '--extractor-args', 'youtube:player_client=ios,android_vr'
+    ]);
     strategies.push([
       '--extractor-args', 'youtube:player_client=android'
     ]);
@@ -279,12 +346,6 @@ app.post('/api/clips/youtube', (req, res) => {
     ]);
     strategies.push([
       '--extractor-args', 'youtube:player_client=android,ios'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=tv,tv_embedded'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=ios,tv,mweb', '--js-runtimes', 'node'
     ]);
     strategies.push([
       '--js-runtimes', 'node'
@@ -304,8 +365,8 @@ app.post('/api/clips/youtube', (req, res) => {
       if (strategyIndex >= strategies.length) {
         console.error('All yt-dlp download strategies failed. Last error:', lastError);
         const advice = !cookiePath 
-          ? "YouTube bot verification triggered on cloud datacenter IP. Please click 'Advanced / Server Cookies 🍪' below to upload your YouTube cookies.txt file, or add a YOUTUBE_COOKIES environment variable in Render!"
-          : "Sign in authentication check failed. Your uploaded cookies may have expired—please export a fresh cookies.txt from a browser while logged into YouTube and upload it in 'Advanced / Server Cookies 🍪'.";
+          ? "YouTube bot verification check triggered on cloud datacenter IP. Please click 'Advanced / Server Cookies 🍪' below to upload your YouTube cookies.txt file, or add a YOUTUBE_COOKIES environment variable in Render!"
+          : "YouTube bot authentication failed. If you set YOUTUBE_COOKIES in Render, try Base64-encoding your cookies.txt before pasting it into Render to prevent line-break corruption! You can also re-export a fresh cookies.txt and directly upload it in 'Advanced / Server Cookies 🍪'.";
         return res.status(500).json({ error: `YouTube import failed on deployed server: ${advice}`, details: lastError || 'Sign in required / bot check.' });
       }
 
@@ -626,4 +687,31 @@ if (fs.existsSync(clientDist)) {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎤 VoiceDub Arena API Server listening on port ${PORT}`);
+  
+  // Initialize and verify YouTube cookies on startup
+  try {
+    const cookiePath = getYouTubeCookiesPath();
+    if (cookiePath) {
+      console.log(`🍪 [YouTube Cookies] Successfully verified active cookies file at: ${cookiePath}`);
+    } else {
+      console.log('🍪 [YouTube Cookies] No custom cookies configured (YOUTUBE_COOKIES env variable not set or empty).');
+    }
+  } catch (e) {
+    console.error('Error checking YouTube cookies on startup:', e);
+  }
+
+  // Automatically check and upgrade yt-dlp in background on server start to keep pace with YouTube anti-bot updates
+  try {
+    const venvPip = path.join(__dirname, 'venv', 'bin', 'pip');
+    const pipCmd = fs.existsSync(venvPip) ? venvPip : 'pip3';
+    require('child_process').execFile(pipCmd, ['install', '--upgrade', '--no-cache-dir', 'yt-dlp'], (err, stdout, stderr) => {
+      if (!err) {
+        console.log('✨ [yt-dlp Auto-Updater] Verified/Upgraded yt-dlp to newest release on server boot.');
+      } else {
+        console.warn('ℹ️ [yt-dlp Auto-Updater] Could not auto-upgrade yt-dlp via pip (normal if container root is read-only):', err ? err.message : stderr);
+      }
+    });
+  } catch (e) {
+    // Ignore updater failures
+  }
 });

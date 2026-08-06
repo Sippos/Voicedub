@@ -635,7 +635,7 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
                             <li>Upload the file below or paste the contents directly!</li>
                           </ol>
                           <p style={{ margin: '8px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            <em>💡 Render Alternative: Paste the contents of your cookies.txt directly into a <code>YOUTUBE_COOKIES</code> Environment Variable in your Render app dashboard!</em>
+                            <em>💡 Render Alternative: Paste your cookies.txt directly into a <code>YOUTUBE_COOKIES</code> Environment Variable in Render! <strong style={{ color: 'var(--accent-mint)' }}>Pro-tip against Cloud dashboard line-break corruption:</strong> You can also paste your cookie file encoded as <strong>Base64</strong>—our server automatically detects and decodes Base64 on startup!</em>
                           </p>
                         </div>
 

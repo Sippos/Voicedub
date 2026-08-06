@@ -24,9 +24,10 @@ RUN npm install && \
 # Copy application source code
 COPY . .
 
-# Create python virtualenv and install yt-dlp for YouTube imports
+# Create python virtualenv and install latest yt-dlp for YouTube imports
 RUN python3 -m venv /app/server/venv && \
-    /app/server/venv/bin/pip install --no-cache-dir yt-dlp && \
+    /app/server/venv/bin/pip install --no-cache-dir --upgrade pip wheel && \
+    /app/server/venv/bin/pip install --no-cache-dir --upgrade yt-dlp && \
     ln -s /app/server/venv/bin/yt-dlp /usr/local/bin/yt-dlp
 
 # Build React client for production
