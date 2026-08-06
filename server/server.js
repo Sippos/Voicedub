@@ -277,170 +277,69 @@ app.post('/api/youtube/cookies', (req, res) => {
   }
 });
 
-// 3.5. Import video directly from YouTube link using yt-dlp with cookie authentication & resilient cloud fallback strategies
-app.post('/api/clips/youtube', (req, res) => {
+// 3.5. Import video directly from YouTube link using instantaneous Embedded YouTube Architecture (Zero cloud server downloading / Zero anti-bot blocks!)
+app.post('/api/clips/youtube', async (req, res) => {
   try {
-    const { url, title, category, tags, script_cues, cookies } = req.body;
-    if (!url || (!url.includes('youtube.com') && !url.includes('youtu.be') && !url.includes('http'))) {
+    const { url, title, category, tags, script_cues } = req.body;
+    if (!url || typeof url !== 'string') {
       return res.status(400).json({ error: 'Please provide a valid YouTube video or short URL.' });
     }
 
+    // Extract 11-character YouTube video ID using robust regex
+    const ytMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?\/\s]{11})/i);
+    if (!ytMatch || !ytMatch[1]) {
+      return res.status(400).json({ error: 'Could not detect a valid YouTube Video ID from the provided URL. Please enter a valid link (e.g. https://www.youtube.com/watch?v=... or https://www.youtube.com/shorts/...)' });
+    }
+    const videoId = ytMatch[1];
     const id = uuidv4();
-    const filename = `${id}.mp4`;
-    const targetPath = path.join(videosDir, filename);
-    const venvYtDlp = path.join(__dirname, 'venv', 'bin', 'yt-dlp');
-    const ytDlpPath = fs.existsSync(venvYtDlp) ? venvYtDlp : 'yt-dlp';
 
-    // Resolve cookie file path from request body, environment variables, or disk
-    const cookiePath = getYouTubeCookiesPath(cookies);
-    const proxyUrl = process.env.YOUTUBE_PROXY || process.env.YT_PROXY || null;
+    // Construct standard embedded streaming URL and virtual filename
+    const original_url = `https://www.youtube.com/embed/${videoId}`;
+    const filename = `youtube_${videoId}`;
+    const created_at = new Date().toISOString();
 
-    const baseArgs = [
-      '--print', 'after_move:%(title)s',
-      '--no-simulate',
-      '--no-check-certificates',
-      '--no-warnings',
-      '-f', 'best[height<=720]/best',
-      '--recode-video', 'mp4',
-      '-o', targetPath
-    ];
-
-    if (proxyUrl) {
-      baseArgs.push('--proxy', proxyUrl);
-    }
-
-    // Intelligent multi-strategy fallback designed for deployed Cloud websites (Render, AWS, Heroku) & local devs
-    const strategies = [];
-
-    // 1. If YouTube cookies are configured on the server, prioritize cookie-authenticated downloads first
-    // Note: On cloud datacenter IPs (like Render), using standard 'web' player client with desktop browser cookies can trigger instant anti-bot flags due to IP mismatch. We prioritize TV, VR & iOS clients when using cookies!
-    if (cookiePath) {
-      strategies.push([
-        '--cookies', cookiePath,
-        '--extractor-args', 'youtube:player_client=ios,tv,android_vr',
-        '--js-runtimes', 'node'
-      ]);
-      strategies.push([
-        '--cookies', cookiePath,
-        '--extractor-args', 'youtube:player_client=tv,tv_embedded,android_vr'
-      ]);
-      strategies.push([
-        '--cookies', cookiePath,
-        '--extractor-args', 'youtube:player_client=android,ios'
-      ]);
-      strategies.push([
-        '--cookies', cookiePath,
-        '--extractor-args', 'youtube:player_client=web,default',
-        '--js-runtimes', 'node'
-      ]);
-      strategies.push([
-        '--cookies', cookiePath
-      ]);
-    }
-
-    // 2. Dedicated embedded player clients (CRITICAL FOR DATACENTER IPS: Smart TV, TV Embedded & Android VR clients do not require JavaScript bot verification or PoToken challenges, often bypassing cloud datacenter blocks even without cookies!)
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=tv,tv_embedded,android_vr'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=ios,tv,mweb', '--js-runtimes', 'node'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=tv,tv_embedded'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=android_vr,tv'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=ios,android_vr'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=android'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=mweb'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=ios'
-    ]);
-    strategies.push([
-      '--extractor-args', 'youtube:player_client=android,ios'
-    ]);
-    strategies.push([
-      '--js-runtimes', 'node'
-    ]);
-
-    // 3. Local browser cookie extraction fallbacks (for developers running locally on Desktop)
-    strategies.push(['--cookies-from-browser', 'chromium']);
-    strategies.push(['--cookies-from-browser', 'chrome']);
-    strategies.push(['--cookies-from-browser', 'firefox']);
-    strategies.push(['--cookies-from-browser', 'brave']);
-    strategies.push(['--cookies-from-browser', 'edge']);
-
-    // 4. Default unconfigured attempt
-    strategies.push([]);
-
-    const runYtDlp = (strategyIndex = 0, lastError = null) => {
-      if (strategyIndex >= strategies.length) {
-        console.error('All yt-dlp download strategies failed. Last error:', lastError);
-        const advice = !cookiePath 
-          ? "YouTube bot verification check triggered on cloud datacenter IP. Please click 'Advanced / Server Cookies 🍪' below to upload your YouTube cookies.txt file, or add a YOUTUBE_COOKIES environment variable in Render!"
-          : "YouTube bot authentication failed. If you set YOUTUBE_COOKIES in Render, try Base64-encoding your cookies.txt before pasting it into Render to prevent line-break corruption! You can also re-export a fresh cookies.txt and directly upload it in 'Advanced / Server Cookies 🍪'.";
-        return res.status(500).json({ error: `YouTube import failed on deployed server: ${advice}`, details: lastError || 'Sign in required / bot check.' });
-      }
-
-      const strategyArgs = [...strategies[strategyIndex], ...baseArgs, url];
-      console.log(`[yt-dlp] Attempt ${strategyIndex + 1}/${strategies.length} using strategy: ${strategies[strategyIndex].join(' ') || 'default'}`);
-
-      require('child_process').execFile(ytDlpPath, strategyArgs, { timeout: 180000 }, (err, stdout, stderr) => {
-        const fileExists = fs.existsSync(targetPath) && fs.statSync(targetPath).size > 1000;
-        
-        if (err || !fileExists) {
-          const detail = stderr ? stderr.split('\n').filter(l => l.includes('ERROR:') || l.includes('error:') || l.includes('Sign in') || l.includes('bot')).slice(0, 2).join(' - ') : (err && err.message);
-          console.warn(`[yt-dlp] Strategy ${strategyIndex + 1} failed: ${detail || 'No video generated'}`);
-          if (fs.existsSync(targetPath)) {
-            try { fs.unlinkSync(targetPath); } catch (e) {}
-          }
-          return runYtDlp(strategyIndex + 1, detail || (err && err.message));
-        }
-
-        try {
-          const extractedTitle = stdout ? stdout.trim().split('\n')[0] : 'Imported YouTube Clip';
-          const finalTitle = title && title.trim() !== '' ? title.trim() : (extractedTitle || 'Imported YouTube Clip');
-          const finalCategory = category || 'General';
-          const parsedTags = tags ? JSON.stringify(typeof tags === 'string' ? tags.split(',').map(t => t.trim()).filter(Boolean) : tags) : '["YouTube"]';
-          const finalCues = script_cues || '00:01 - Character A: (Speaking YouTube line...)\n00:05 - Character B: (Replying in custom voice...)';
-          const original_url = `/uploads/videos/${filename}`;
-          const created_at = new Date().toISOString();
-
-          db.prepare(`
-            INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-          `).run(id, finalTitle, finalCategory, parsedTags, filename, original_url, finalCues, created_at);
-
-          res.status(201).json({
-            id,
-            title: finalTitle,
-            category: finalCategory,
-            tags: JSON.parse(parsedTags),
-            filename,
-            original_url,
-            script_cues: finalCues,
-            created_at,
-            dub_count: 0
-          });
-        } catch (dbErr) {
-          console.error('Database save error after yt-dlp:', dbErr);
-          res.status(500).json({ error: 'Failed to save downloaded clip metadata to database.' });
-        }
+    // Attempt to retrieve authentic YouTube title via public oEmbed (immune to anti-bot verification)
+    let extractedTitle = `YouTube Clip (${videoId})`;
+    try {
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+        signal: AbortSignal.timeout(4000)
       });
-    };
+      if (oembedRes.ok) {
+        const oembedData = await oembedRes.json();
+        if (oembedData && oembedData.title) {
+          extractedTitle = oembedData.title;
+        }
+      }
+    } catch (oErr) {
+      console.log(`[YouTube oEmbed] Could not fetch metadata for video ID ${videoId} (defaulting to custom title):`, oErr.message);
+    }
 
-    runYtDlp(0);
+    const finalTitle = title && title.trim() !== '' ? title.trim() : extractedTitle;
+    const finalCategory = category || 'General';
+    const parsedTags = tags ? JSON.stringify(typeof tags === 'string' ? tags.split(',').map(t => t.trim()).filter(Boolean) : tags) : '["YouTube"]';
+    const finalCues = script_cues || '00:01 - Character A: (Performing vocal dub over YouTube video...)\n00:05 - Character B: (Replying in studio take...)';
 
+    db.prepare(`
+      INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, finalTitle, finalCategory, parsedTags, filename, original_url, finalCues, created_at);
+
+    console.log(`✨ [Embedded YouTube Import] Immediately linked YouTube clip '${finalTitle}' (ID: ${videoId}) into Vault!`);
+
+    res.status(201).json({
+      id,
+      title: finalTitle,
+      category: finalCategory,
+      tags: JSON.parse(parsedTags),
+      filename,
+      original_url,
+      script_cues: finalCues,
+      created_at,
+      dub_count: 0
+    });
   } catch (error) {
     console.error('YouTube import route error:', error);
-    res.status(500).json({ error: 'Failed to initiate YouTube download job.' });
+    res.status(500).json({ error: 'Failed to import embedded YouTube video link.' });
   }
 });
 
@@ -595,19 +494,33 @@ app.post('/api/dubs/:id/vote', (req, res) => {
   }
 });
 
-// 7. Export mixed video MP4 using fluent-ffmpeg
+// 7. Export mixed video MP4 using fluent-ffmpeg (or audio soundtrack for YouTube embedded clips!)
 app.post('/api/dubs/:id/export', (req, res) => {
   try {
-    const dub = db.prepare('SELECT d.*, c.filename as clip_filename FROM dubs d JOIN clips c ON d.clip_id = c.id WHERE d.id = ?').get(req.params.id);
+    const dub = db.prepare('SELECT d.*, c.filename as clip_filename, c.original_url FROM dubs d JOIN clips c ON d.clip_id = c.id WHERE d.id = ?').get(req.params.id);
     if (!dub) return res.status(404).json({ error: 'Dub not found.' });
 
-    const videoPath = path.join(videosDir, dub.clip_filename);
     const audioPath = path.join(dubsDir, dub.audio_filename);
+    if (!fs.existsSync(audioPath)) {
+      return res.status(404).json({ error: 'Recorded dub audio file missing on server.' });
+    }
+
+    // Check if source video is an embedded YouTube link
+    const isYouTubeClip = (dub.clip_filename && dub.clip_filename.startsWith('youtube_')) || (dub.original_url && dub.original_url.includes('youtube'));
+    if (isYouTubeClip) {
+      return res.json({ 
+        download_url: `/uploads/dubs/${dub.audio_filename}`,
+        is_youtube_soundtrack: true,
+        message: 'This dub is powered by zero-block Embedded YouTube architecture. Downloading your studio audio soundtrack!'
+      });
+    }
+
+    const videoPath = path.join(videosDir, dub.clip_filename);
     const exportFilename = `export_${dub.id}.mp4`;
     const exportPath = path.join(exportsDir, exportFilename);
 
-    if (!fs.existsSync(videoPath) || !fs.existsSync(audioPath)) {
-      return res.status(404).json({ error: 'Source media files missing on server.' });
+    if (!fs.existsSync(videoPath)) {
+      return res.status(404).json({ error: 'Source media video missing on server.' });
     }
 
     // If export already exists, return it immediately!

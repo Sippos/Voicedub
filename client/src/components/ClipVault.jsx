@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Upload, Film, Mic, Trophy, Plus, X, Search, Tag, Video, FileVideo, Loader2, Scissors, Clock, Sliders, ShieldAlert, ShieldCheck, Key } from 'lucide-react';
+import UniversalPlayer from './UniversalPlayer.jsx';
 
 export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroom, onClipUploaded }) {
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -306,11 +307,9 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
           {filteredClips.map(clip => (
             <div key={clip.id} className="glass-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div className="video-container" style={{ aspectRatio: '16/9', background: '#080514' }}>
-                <video 
+                <UniversalPlayer 
                   src={clip.original_url} 
                   controls={true}
-                  preload="metadata"
-                  playsInline
                   className="video-element" 
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
                 />
@@ -380,10 +379,10 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
             </div>
 
             <div style={{ marginBottom: '20px', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border-light)', background: '#080514' }}>
-              <video 
+              <UniversalPlayer 
                 ref={cropVideoRef}
                 src={croppingClip.original_url} 
-                controls
+                controls={true}
                 style={{ maxHeight: '320px', width: '100%', display: 'block', margin: '0 auto' }} 
               />
               <div style={{ padding: '12px 16px', background: 'rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-around', alignItems: 'center', gap: '12px', borderTop: '1px solid var(--border-light)' }}>
@@ -600,92 +599,22 @@ export default function ClipVault({ clips, onSelectForStudio, onSelectForShowroo
                     disabled={uploading}
                   />
 
-                  {/* Cloud Server Deployed IP Cookie Authentication Bypass Accordion */}
+                  {/* Zero-Block Embedded Architecture Info Banner */}
                   <div style={{
-                    background: cookiesConfigured ? 'rgba(16, 185, 129, 0.08)' : 'rgba(239, 68, 68, 0.08)',
-                    border: cookiesConfigured ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.3)',
+                    background: 'rgba(16, 185, 129, 0.1)',
+                    border: '1px solid rgba(16, 185, 129, 0.4)',
                     borderRadius: '10px',
                     padding: '14px 16px',
-                    marginTop: '12px',
+                    marginTop: '14px',
                     marginBottom: '10px'
                   }}>
-                    <div 
-                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', userSelect: 'none' }}
-                      onClick={() => setShowCookieAuth(!showCookieAuth)}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '0.88rem', color: cookiesConfigured ? '#10B981' : '#ff7a7a' }}>
-                        {cookiesConfigured ? <ShieldCheck size={18} color="#10B981" /> : <ShieldAlert size={18} color="#ff4d4d" />}
-                        <span>Cloud Bot Protection & Cookies: {cookiesConfigured ? 'Active on Server ✅' : 'Optional / Bypass Cloud Bot Blocker 🍪'}</span>
-                      </div>
-                      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                        {showCookieAuth ? '▲ Hide Settings' : '▼ Configure Cookies'}
-                      </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 700, fontSize: '0.9rem', color: '#10B981' }}>
+                      <ShieldCheck size={20} color="#10B981" />
+                      <span>Zero-Block Embedded Architecture Active ⚡</span>
                     </div>
-                    
-                    {showCookieAuth && (
-                      <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid rgba(255, 255, 255, 0.1)', fontSize: '0.85rem', color: '#ccc' }}>
-                        <p style={{ margin: '0 0 10px 0', lineHeight: 1.5, color: '#e2e8f0' }}>
-                          <strong>Why is this needed on deployed websites?</strong> Cloud datacenters (Render, Heroku, AWS) have IP ranges that YouTube frequently blocks with anti-bot verifications (<em>"Sign in to confirm you’re not a bot"</em>). Providing cookies authenticates the server!
-                        </p>
-                        <div style={{ background: 'rgba(0, 0, 0, 0.35)', padding: '10px 12px', borderRadius: '8px', marginBottom: '12px', borderLeft: '3px solid #ff4d4d' }}>
-                          <p style={{ margin: '0 0 6px 0', fontWeight: 600, color: '#ff7a7a' }}>🚀 How to easily pass cookies to your server:</p>
-                          <ol style={{ margin: '0', paddingLeft: '20px', lineHeight: 1.6 }}>
-                            <li>While signed into YouTube in Chrome or Firefox, install an extension like <strong>"Get cookies.txt LOCALLY"</strong>.</li>
-                            <li>Export your YouTube cookies as a <code>cookies.txt</code> file.</li>
-                            <li>Upload the file below or paste the contents directly!</li>
-                          </ol>
-                          <p style={{ margin: '8px 0 0 0', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-                            <em>💡 Render Alternative: Paste your cookies.txt directly into a <code>YOUTUBE_COOKIES</code> Environment Variable in Render! <strong style={{ color: 'var(--accent-mint)' }}>Pro-tip against Cloud dashboard line-break corruption:</strong> You can also paste your cookie file encoded as <strong>Base64</strong>—our server automatically detects and decodes Base64 on startup!</em>
-                          </p>
-                        </div>
-
-                        <div style={{ marginBottom: '12px' }}>
-                          <label className="input-label" style={{ fontSize: '0.8rem', color: 'var(--accent-mint)' }}>
-                            📁 Upload cookies.txt file:
-                          </label>
-                          <input 
-                            type="file" 
-                            accept=".txt" 
-                            onChange={handleCookieFileUpload} 
-                            style={{ fontSize: '0.8rem', marginTop: '4px', display: 'block', width: '100%', color: '#fff' }}
-                          />
-                        </div>
-
-                        <div style={{ marginBottom: '12px' }}>
-                          <label className="input-label" style={{ fontSize: '0.8rem', color: 'var(--accent-mint)' }}>
-                            📋 Or paste cookies.txt content below:
-                          </label>
-                          <textarea 
-                            value={cookiesText}
-                            onChange={(e) => setCookiesText(e.target.value)}
-                            placeholder="# Netscape HTTP Cookie File&#10;.youtube.com	TRUE	/	TRUE	1791234567	GPS	1..."
-                            rows={4}
-                            className="input-field"
-                            style={{ fontFamily: 'monospace', fontSize: '0.75rem', width: '100%', resize: 'vertical' }}
-                          />
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={handleSaveCookies}
-                          disabled={savingCookies || !cookiesText.trim()}
-                          className="btn"
-                          style={{ 
-                            background: !cookiesText.trim() ? 'rgba(255,255,255,0.1)' : '#10B981', 
-                            color: '#fff', 
-                            padding: '8px 16px', 
-                            fontSize: '0.85rem',
-                            cursor: !cookiesText.trim() ? 'not-allowed' : 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px'
-                          }}
-                        >
-                          {savingCookies ? <Loader2 size={16} className="animate-spin" /> : <Key size={16} />}
-                          Save Authentication Cookies to Server Storage
-                        </button>
-                      </div>
-                    )}
+                    <p style={{ margin: '8px 0 0 0', fontSize: '0.84rem', color: '#e2e8f0', lineHeight: 1.5 }}>
+                      YouTube videos and Shorts stream natively via official client embedded players! No cloud IP blocking, no cookie uploading required, and instant importing in under 1 second.
+                    </p>
                   </div>
                 </div>
               )}

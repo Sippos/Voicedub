@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trophy, Flame, Laugh, Skull, Download, Film, Volume2, Loader2, Share2, Music, User } from 'lucide-react';
 import DualWaveform from './DualWaveform';
+import UniversalPlayer from './UniversalPlayer';
 
 export default function Showroom({ clip, allClips, onSelectClip }) {
   const [clipData, setClipData] = useState(null);
@@ -170,8 +171,8 @@ export default function Showroom({ clip, allClips, onSelectClip }) {
       <div className="studio-layout">
         {/* Cinema Video Player Deck */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-          <div className="video-container" style={{ boxShadow: '0 0 35px rgba(255, 0, 127, 0.25)', borderColor: 'var(--border-glow)' }}>
-            <video 
+          <div className="video-container" style={{ boxShadow: '0 0 35px rgba(255, 0, 127, 0.25)', borderColor: 'var(--border-glow)', aspectRatio: '16/9', background: '#080514' }}>
+            <UniversalPlayer 
               ref={videoRef}
               src={clip.original_url} 
               controls={true}
@@ -252,33 +253,36 @@ export default function Showroom({ clip, allClips, onSelectClip }) {
               </div>
             </div>
 
-            {selectedDub && (
-              <div>
-                {exportUrls[selectedDub.id] ? (
-                  <a 
-                    href={exportUrls[selectedDub.id]} 
-                    download
-                    className="btn btn-primary"
-                    style={{ background: 'var(--accent-mint)', color: '#000' }}
-                  >
-                    <Download size={18} /> Download Finished MP4
-                  </a>
-                ) : (
-                  <button 
-                    className="btn btn-outline" 
-                    onClick={() => handleExportMP4(selectedDub.id)}
-                    disabled={exportingDubId === selectedDub.id}
-                    style={{ borderColor: 'var(--accent-mint)', color: 'var(--accent-mint)' }}
-                  >
-                    {exportingDubId === selectedDub.id ? (
-                      <><Loader2 className="animate-spin" size={18} style={{ animation: 'spin 1s linear infinite' }} /> Mixing MP4 on Server...</>
-                    ) : (
-                      <><Share2 size={18} /> Export Merged MP4 Video</>
-                    )}
-                  </button>
-                )}
-              </div>
-            )}
+            {selectedDub && (() => {
+              const isYouTubeClip = clip && typeof clip.original_url === 'string' && (clip.original_url.includes('youtube') || clip.original_url.includes('youtu.be'));
+              return (
+                <div>
+                  {exportUrls[selectedDub.id] ? (
+                    <a 
+                      href={exportUrls[selectedDub.id]} 
+                      download
+                      className="btn btn-primary"
+                      style={{ background: 'var(--accent-mint)', color: '#000' }}
+                    >
+                      <Download size={18} /> {isYouTubeClip ? 'Download Vocal Soundtrack Audio' : 'Download Finished MP4 Video'}
+                    </a>
+                  ) : (
+                    <button 
+                      className="btn btn-outline" 
+                      onClick={() => handleExportMP4(selectedDub.id)}
+                      disabled={exportingDubId === selectedDub.id}
+                      style={{ borderColor: 'var(--accent-mint)', color: 'var(--accent-mint)' }}
+                    >
+                      {exportingDubId === selectedDub.id ? (
+                        <><Loader2 className="animate-spin" size={18} style={{ animation: 'spin 1s linear infinite' }} /> {isYouTubeClip ? 'Preparing Audio Track...' : 'Mixing MP4 on Server...'}</>
+                      ) : (
+                        <><Share2 size={18} /> {isYouTubeClip ? 'Export Studio Vocal Track' : 'Export Merged MP4 Video'}</>
+                      )}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </div>
 

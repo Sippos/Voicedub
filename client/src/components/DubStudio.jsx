@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mic, Square, Play, Pause, RotateCcw, Volume2, Save, Sparkles, Edit3, Check, Film, Music } from 'lucide-react';
 import DualWaveform from './DualWaveform';
+import UniversalPlayer from './UniversalPlayer';
 
 export default function DubStudio({ clip, allClips, onSelectClip, onDubSubmitted }) {
   const [recording, setRecording] = useState(false);
@@ -211,10 +212,11 @@ export default function DubStudio({ clip, allClips, onSelectClip, onDubSubmitted
       <div className="studio-layout">
         {/* Left Column: Media Booth & Audition Controls */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          <div className="video-container" style={{ border: recording ? '2px solid #ff1f5a' : '1px solid var(--border-light)' }}>
-            <video 
+          <div className="video-container" style={{ border: recording ? '2px solid #ff1f5a' : '1px solid var(--border-light)', aspectRatio: '16/9', background: '#080514' }}>
+            <UniversalPlayer 
               ref={videoRef}
               src={clip.original_url} 
+              controls={true}
               className="video-element" 
               onEnded={() => {
                 setIsPlaying(false);
