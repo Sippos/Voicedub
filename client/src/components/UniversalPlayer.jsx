@@ -12,7 +12,7 @@ export default React.forwardRef(function UniversalPlayer({
   ...props
 }, ref) {
   // Check if source is a YouTube embed URL or ID
-  const isYouTube = typeof src === 'string' && (src.includes('youtube.com/embed') || src.includes('youtu.be') || src.includes('youtube.com/watch'));
+  const isYouTube = typeof src === 'string' && (src.includes('youtube.com/embed') || src.includes('youtube-nocookie.com/embed') || src.includes('youtu.be') || src.includes('youtube.com/watch'));
   
   // Extract 11-character Video ID if it's YouTube
   let videoId = null;
