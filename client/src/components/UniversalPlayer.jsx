@@ -47,6 +47,15 @@ export default React.forwardRef(function UniversalPlayer({
       }
       try {
         playerInstance = new window.YT.Player(playerId, {
+          host: 'https://www.youtube-nocookie.com',
+          videoId: videoId,
+          playerVars: {
+            playsinline: 1,
+            controls: controls ? 1 : 0,
+            rel: 0,
+            modestbranding: 1,
+            origin: window.location.origin
+          },
           events: {
             onReady: (event) => {
               ytPlayerRef.current = event.target;
@@ -205,18 +214,15 @@ export default React.forwardRef(function UniversalPlayer({
   }), [isYouTube]);
 
   if (isYouTube && videoId) {
-    // Render official YouTube Embedded IFrame Player
+    // Render an empty div and let the official YouTube IFrame API construct the iframe dynamically!
+    // Hardcoding the <iframe> tag manually causes a known race condition that throws "Playback ID" errors.
     return (
       <div style={{ width: '100%', height: '100%', position: 'relative', background: '#000', ...style }}>
-        <iframe
+        <div
           id={playerId}
           ref={iframeRef}
-          src={`https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&origin=${window.location.origin}&playsinline=1&controls=${controls ? 1 : 0}&rel=0&modestbranding=1`}
           className={className}
           style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
-          title="YouTube video player"
         />
       </div>
     );
