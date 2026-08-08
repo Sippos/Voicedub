@@ -277,70 +277,84 @@ app.post('/api/youtube/cookies', (req, res) => {
   }
 });
 
-// 3.5. Import video directly from YouTube link using instantaneous Embedded YouTube Architecture (Zero cloud server downloading / Zero anti-bot blocks!)
-app.post('/api/clips/youtube', async (req, res) => {
-  try {
-    const { url, title, category, tags, script_cues } = req.body;
-    if (!url || typeof url !== 'string') {
-      return res.status(400).json({ error: 'Please provide a valid YouTube video or short URL.' });
+// 3.5. Get YouTube Video Metadata
+app.get('/api/youtube/metadata', (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: 'Please provide a YouTube URL' });
+
+  const ytDlpPath = path.join(__dirname, 'venv', 'bin', 'yt-dlp');
+  const cmd = `"${fs.existsSync(ytDlpPath) ? ytDlpPath : 'yt-dlp'}" -j "${url}"`;
+
+  require('child_process').exec(cmd, { timeout: 30000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error('yt-dlp metadata error:', err, stderr);
+      return res.status(500).json({ error: 'Failed to fetch YouTube metadata.' });
     }
-
-    // Extract 11-character YouTube video ID using robust regex
-    const ytMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?\/\s]{11})/i);
-    if (!ytMatch || !ytMatch[1]) {
-      return res.status(400).json({ error: 'Could not detect a valid YouTube Video ID from the provided URL. Please enter a valid link (e.g. https://www.youtube.com/watch?v=... or https://www.youtube.com/shorts/...)' });
-    }
-    const videoId = ytMatch[1];
-    const id = uuidv4();
-
-    // Construct standard embedded streaming URL and virtual filename
-    const original_url = `https://www.youtube-nocookie.com/embed/${videoId}`;
-    const filename = `youtube_${videoId}`;
-    const created_at = new Date().toISOString();
-
-    // Attempt to retrieve authentic YouTube title via public oEmbed (immune to anti-bot verification)
-    let extractedTitle = `YouTube Clip (${videoId})`;
     try {
-      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
-        signal: AbortSignal.timeout(4000)
+      const data = JSON.parse(stdout);
+      res.json({
+        title: data.title,
+        duration: data.duration,
+        thumbnail: data.thumbnail
       });
-      if (oembedRes.ok) {
-        const oembedData = await oembedRes.json();
-        if (oembedData && oembedData.title) {
-          extractedTitle = oembedData.title;
-        }
-      }
-    } catch (oErr) {
-      console.log(`[YouTube oEmbed] Could not fetch metadata for video ID ${videoId} (defaulting to custom title):`, oErr.message);
+    } catch (e) {
+      res.status(500).json({ error: 'Failed to parse YouTube metadata.' });
     }
+  });
+});
 
-    const finalTitle = title && title.trim() !== '' ? title.trim() : extractedTitle;
-    const finalCategory = category || 'General';
-    const parsedTags = tags ? JSON.stringify(typeof tags === 'string' ? tags.split(',').map(t => t.trim()).filter(Boolean) : tags) : '["YouTube"]';
-    const finalCues = script_cues || '00:01 - Character A: (Performing vocal dub over YouTube video...)\n00:05 - Character B: (Replying in studio take...)';
+// 3.6. Download and Crop YouTube Video
+app.post('/api/youtube/download', (req, res) => {
+  const { url, start_time, end_time, title } = req.body;
+  if (!url) return res.status(400).json({ error: 'Please provide a YouTube URL' });
 
-    db.prepare(`
-      INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(id, finalTitle, finalCategory, parsedTags, filename, original_url, finalCues, created_at);
-
-    console.log(`✨ [Embedded YouTube Import] Immediately linked YouTube clip '${finalTitle}' (ID: ${videoId}) into Vault!`);
-
-    res.status(201).json({
-      id,
-      title: finalTitle,
-      category: finalCategory,
-      tags: JSON.parse(parsedTags),
-      filename,
-      original_url,
-      script_cues: finalCues,
-      created_at,
-      dub_count: 0
-    });
-  } catch (error) {
-    console.error('YouTube import route error:', error);
-    res.status(500).json({ error: 'Failed to import embedded YouTube video link.' });
+  const id = uuidv4();
+  const filename = `${id}.mp4`;
+  const outputPath = path.join(videosDir, filename);
+  const ytDlpPath = path.join(__dirname, 'venv', 'bin', 'yt-dlp');
+  
+  // Construct yt-dlp command. Use --download-sections if start/end are provided
+  let timeOpts = '';
+  if (start_time !== undefined && end_time !== undefined) {
+    // yt-dlp format: --download-sections "*start-end"
+    timeOpts = `--download-sections "*${start_time}-${end_time}"`;
   }
+
+  // Force output to mp4 format with best compatible video and audio
+  const cmd = `"${fs.existsSync(ytDlpPath) ? ytDlpPath : 'yt-dlp'}" -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" ${timeOpts} --force-keyframes-at-cuts -o "${outputPath}" "${url}"`;
+
+  require('child_process').exec(cmd, { timeout: 120000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error('yt-dlp download error:', err, stderr);
+      return res.status(500).json({ error: 'Failed to download YouTube video segment.' });
+    }
+    
+    // Save to database
+    try {
+      const finalTitle = title || 'YouTube Clip';
+      const original_url = `/uploads/videos/${filename}`;
+      const created_at = new Date().toISOString();
+      const tags = JSON.stringify(['YouTube']);
+      const script_cues = '00:01 - Character A: (Dub me!)';
+
+      db.prepare(`
+        INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, finalTitle, 'YouTube Import', tags, filename, original_url, script_cues, created_at);
+
+      res.status(201).json({
+        id,
+        title: finalTitle,
+        filename,
+        original_url,
+        created_at,
+        dub_count: 0
+      });
+    } catch (dbErr) {
+      console.error('Database error after youtube download:', dbErr);
+      res.status(500).json({ error: 'Failed to record clip in database.' });
+    }
+  });
 });
 
 // 4. Update dialogue teleprompter script for a clip

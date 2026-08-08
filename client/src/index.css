@@ -644,3 +644,67 @@ a {
     padding: 3px 8px;
   }
 }
+
+/* Mobile Funnel Styles */
+.mobile-funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.funnel-header {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.funnel-header h1 {
+  font-family: var(--font-heading);
+  background: linear-gradient(135deg, #00f0ff 0%, #ff007f 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-size: 2rem;
+  margin-bottom: 15px;
+}
+
+.steps-indicator {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+}
+
+.steps-indicator span {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  color: #fff;
+  transition: all 0.3s;
+}
+
+.steps-indicator span.active {
+  background: var(--primary);
+  color: #000;
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+
+.funnel-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.funnel-step h2 {
+  font-size: 1.5rem;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.mobile-video-container {
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.8);
+  border: 1px solid var(--border-light);
+}
