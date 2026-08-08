@@ -283,7 +283,14 @@ app.get('/api/youtube/metadata', (req, res) => {
   if (!url) return res.status(400).json({ error: 'Please provide a YouTube URL' });
 
   const ytDlpPath = path.join(__dirname, 'venv', 'bin', 'yt-dlp');
-  const cmd = `"${fs.existsSync(ytDlpPath) ? ytDlpPath : 'yt-dlp'}" -j "${url}"`;
+  let cmd = `"${fs.existsSync(ytDlpPath) ? ytDlpPath : 'yt-dlp'}"`;
+  
+  const cookiePath = getYouTubeCookiesPath();
+  if (cookiePath) {
+    cmd += ` --cookies "${cookiePath}"`;
+  }
+  
+  cmd += ` -j "${url}"`;
 
   require('child_process').exec(cmd, { timeout: 30000 }, (err, stdout, stderr) => {
     if (err) {
@@ -319,9 +326,15 @@ app.post('/api/youtube/download', (req, res) => {
     // yt-dlp format: --download-sections "*start-end"
     timeOpts = `--download-sections "*${start_time}-${end_time}"`;
   }
+  
+  let cookieOpts = '';
+  const cookiePath = getYouTubeCookiesPath();
+  if (cookiePath) {
+    cookieOpts = `--cookies "${cookiePath}"`;
+  }
 
   // Force output to mp4 format with best compatible video and audio
-  const cmd = `"${fs.existsSync(ytDlpPath) ? ytDlpPath : 'yt-dlp'}" -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" ${timeOpts} --force-keyframes-at-cuts -o "${outputPath}" "${url}"`;
+  const cmd = `"${fs.existsSync(ytDlpPath) ? ytDlpPath : 'yt-dlp'}" ${cookieOpts} -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" ${timeOpts} --force-keyframes-at-cuts -o "${outputPath}" "${url}"`;
 
   require('child_process').exec(cmd, { timeout: 120000 }, (err, stdout, stderr) => {
     if (err) {
