@@ -277,97 +277,68 @@ app.post('/api/youtube/cookies', (req, res) => {
   }
 });
 
-// 3.5. Get YouTube Video Metadata
-app.get('/api/youtube/metadata', (req, res) => {
-  const { url } = req.query;
-  if (!url) return res.status(400).json({ error: 'Please provide a YouTube URL' });
-
-  const ytDlpPath = path.join(__dirname, 'venv', 'bin', 'yt-dlp');
-  let cmd = `"${fs.existsSync(ytDlpPath) ? ytDlpPath : 'yt-dlp'}"`;
-  
-  const cookiePath = getYouTubeCookiesPath();
-  if (cookiePath) {
-    cmd += ` --cookies "${cookiePath}"`;
-  }
-  
-  cmd += ` -j "${url}"`;
-
-  require('child_process').exec(cmd, { timeout: 30000 }, (err, stdout, stderr) => {
-    if (err) {
-      console.error('yt-dlp metadata error:', err, stderr);
-      return res.status(500).json({ error: 'Failed to fetch YouTube metadata.' });
+// 3.5. Import video directly from YouTube link using instantaneous Embedded YouTube Architecture (Client-Side bypass!)
+app.post('/api/clips/youtube', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url || typeof url !== 'string') {
+      return res.status(400).json({ error: 'Please provide a valid YouTube video or short URL.' });
     }
+
+    // Extract 11-character YouTube video ID using robust regex
+    const ytMatch = url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=|shorts\/)|youtu\.be\/)([^"&?\/\s]{11})/i);
+    if (!ytMatch || !ytMatch[1]) {
+      return res.status(400).json({ error: 'Could not detect a valid YouTube Video ID from the provided URL.' });
+    }
+    const videoId = ytMatch[1];
+    const id = uuidv4();
+
+    // Construct standard embedded streaming URL and virtual filename
+    const original_url = `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&origin=${encodeURIComponent('http://localhost:5173')}`;
+    const filename = `youtube_${videoId}`;
+    const created_at = new Date().toISOString();
+
+    // Attempt to retrieve authentic YouTube title via public oEmbed (immune to anti-bot verification)
+    let extractedTitle = `YouTube Clip (${videoId})`;
+    let thumbnail = null;
     try {
-      const data = JSON.parse(stdout);
-      res.json({
-        title: data.title,
-        duration: data.duration,
-        thumbnail: data.thumbnail
+      const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+        signal: AbortSignal.timeout(4000)
       });
-    } catch (e) {
-      res.status(500).json({ error: 'Failed to parse YouTube metadata.' });
+      if (oembedRes.ok) {
+        const oembedData = await oembedRes.json();
+        if (oembedData && oembedData.title) {
+          extractedTitle = oembedData.title;
+        }
+        if (oembedData && oembedData.thumbnail_url) {
+          thumbnail = oembedData.thumbnail_url;
+        }
+      }
+    } catch (oErr) {
+      console.log(`[YouTube oEmbed] Could not fetch metadata for video ID ${videoId}:`, oErr.message);
     }
-  });
-});
 
-// 3.6. Download and Crop YouTube Video
-app.post('/api/youtube/download', (req, res) => {
-  const { url, start_time, end_time, title } = req.body;
-  if (!url) return res.status(400).json({ error: 'Please provide a YouTube URL' });
+    const tags = JSON.stringify(['YouTube']);
+    const script_cues = '00:01 - Character A: (Dub me!)';
 
-  const id = uuidv4();
-  const filename = `${id}.mp4`;
-  const outputPath = path.join(videosDir, filename);
-  const ytDlpPath = path.join(__dirname, 'venv', 'bin', 'yt-dlp');
-  
-  // Construct yt-dlp command. Use --download-sections if start/end are provided
-  let timeOpts = '';
-  if (start_time !== undefined && end_time !== undefined) {
-    // yt-dlp format: --download-sections "*start-end"
-    timeOpts = `--download-sections "*${start_time}-${end_time}"`;
+    db.prepare(`
+      INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, extractedTitle, 'YouTube Import', tags, filename, original_url, script_cues, created_at);
+
+    res.status(201).json({
+      id,
+      title: extractedTitle,
+      thumbnail,
+      filename,
+      original_url,
+      created_at,
+      dub_count: 0
+    });
+  } catch (error) {
+    console.error('YouTube import route error:', error);
+    res.status(500).json({ error: 'Failed to import embedded YouTube video link.' });
   }
-  
-  let cookieOpts = '';
-  const cookiePath = getYouTubeCookiesPath();
-  if (cookiePath) {
-    cookieOpts = `--cookies "${cookiePath}"`;
-  }
-
-  // Force output to mp4 format with best compatible video and audio
-  const cmd = `"${fs.existsSync(ytDlpPath) ? ytDlpPath : 'yt-dlp'}" ${cookieOpts} -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" ${timeOpts} --force-keyframes-at-cuts -o "${outputPath}" "${url}"`;
-
-  require('child_process').exec(cmd, { timeout: 120000 }, (err, stdout, stderr) => {
-    if (err) {
-      console.error('yt-dlp download error:', err, stderr);
-      return res.status(500).json({ error: 'Failed to download YouTube video segment.' });
-    }
-    
-    // Save to database
-    try {
-      const finalTitle = title || 'YouTube Clip';
-      const original_url = `/uploads/videos/${filename}`;
-      const created_at = new Date().toISOString();
-      const tags = JSON.stringify(['YouTube']);
-      const script_cues = '00:01 - Character A: (Dub me!)';
-
-      db.prepare(`
-        INSERT INTO clips (id, title, category, tags, filename, original_url, script_cues, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, finalTitle, 'YouTube Import', tags, filename, original_url, script_cues, created_at);
-
-      res.status(201).json({
-        id,
-        title: finalTitle,
-        filename,
-        original_url,
-        created_at,
-        dub_count: 0
-      });
-    } catch (dbErr) {
-      console.error('Database error after youtube download:', dbErr);
-      res.status(500).json({ error: 'Failed to record clip in database.' });
-    }
-  });
 });
 
 // 4. Update dialogue teleprompter script for a clip

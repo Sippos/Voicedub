@@ -1,19 +1,19 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import DualWaveform from './DualWaveform';
+import UniversalPlayer from './UniversalPlayer';
 import { Mic, Square, Play, Pause, Download, ChevronRight, Video, Scissors } from 'lucide-react';
 
 export default function MobileFunnel() {
   const [step, setStep] = useState('input'); // input, crop, dub, result
   const [url, setUrl] = useState('');
-  const [metadata, setMetadata] = useState(null);
+  const [clip, setClip] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   
   // Crop state
   const [startTime, setStartTime] = useState(0);
-  const [endTime, setEndTime] = useState(10);
+  const [endTime, setEndTime] = useState(15);
   
   // Dub state
-  const [clip, setClip] = useState(null);
   const [isRecording, setIsRecording] = useState(false);
   const [liveStream, setLiveStream] = useState(null);
   const [recordedUrl, setRecordedUrl] = useState(null);
@@ -25,45 +25,29 @@ export default function MobileFunnel() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  const fetchMetadata = async () => {
+  const importYouTube = async () => {
     if (!url) return;
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/youtube/metadata?url=${encodeURIComponent(url)}`);
+      const res = await fetch('/api/clips/youtube', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      setMetadata(data);
-      setEndTime(Math.min(data.duration, 15)); // default 15s crop
+      setClip(data);
       setStep('crop');
     } catch (e) {
-      alert(e.message || 'Failed to fetch video');
+      alert(e.message || 'Failed to import video');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const downloadAndCrop = async () => {
-    setIsLoading(true);
-    try {
-      const res = await fetch('/api/youtube/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url,
-          start_time: startTime,
-          end_time: endTime,
-          title: metadata?.title
-        })
-      });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setClip(data);
-      setStep('dub');
-    } catch (e) {
-      alert(e.message || 'Failed to download and crop');
-    } finally {
-      setIsLoading(false);
-    }
+  const confirmCrop = () => {
+    // In client-side mode, we just pass the start/end times to the player during dubbing
+    setStep('dub');
   };
 
   const startRecording = async () => {
@@ -88,17 +72,16 @@ export default function MobileFunnel() {
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start();
       setIsRecording(true);
-      
       setRecordedUrl(null);
 
       if (videoRef.current) {
-        videoRef.current.currentTime = 0;
-        videoRef.current.volume = 0.1;
+        videoRef.current.currentTime = startTime; // Start at cropped time
+        videoRef.current.volume = 0.15;
         videoRef.current.play();
         setIsPlaying(true);
       }
     } catch (err) {
-      alert('Could not access microphone!');
+      alert('Could not access microphone! Please allow permissions.');
     }
   };
 
@@ -116,7 +99,7 @@ export default function MobileFunnel() {
 
   const playAudition = () => {
     if (!recordedUrl || !videoRef.current || !audioRef.current) return;
-    videoRef.current.currentTime = 0;
+    videoRef.current.currentTime = startTime;
     videoRef.current.volume = 0.2;
     audioRef.current.src = recordedUrl;
     audioRef.current.currentTime = 0;
@@ -131,6 +114,20 @@ export default function MobileFunnel() {
     if (audioRef.current) audioRef.current.pause();
     setIsPlaying(false);
   };
+
+  // Enforce the crop end time during playback
+  useEffect(() => {
+    let interval;
+    if (isPlaying && step === 'dub') {
+      interval = setInterval(() => {
+        if (videoRef.current && videoRef.current.currentTime >= endTime) {
+          if (isRecording) stopRecording();
+          else pausePlayback();
+        }
+      }, 200);
+    }
+    return () => clearInterval(interval);
+  }, [isPlaying, isRecording, endTime, step]);
 
   const submitDub = async () => {
     if (!recordedBlob) return;
@@ -148,7 +145,6 @@ export default function MobileFunnel() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       
-      // trigger export
       const exportRes = await fetch(`/api/dubs/${data.id}/export`, { method: 'POST' });
       const exportData = await exportRes.json();
       
@@ -177,7 +173,7 @@ export default function MobileFunnel() {
           <div className="funnel-step input-step glass-card">
             <Video size={48} color="var(--primary)" style={{marginBottom: 20}} />
             <h2>Paste YouTube URL</h2>
-            <p style={{color: 'var(--text-muted)'}}>We'll download the clip directly so you can dub it with zero lag.</p>
+            <p style={{color: 'var(--text-muted)'}}>Plays directly in your browser. No server bans, zero lag.</p>
             <input 
               type="text" 
               className="input-field" 
@@ -186,49 +182,55 @@ export default function MobileFunnel() {
               onChange={(e) => setUrl(e.target.value)}
               style={{width: '100%', marginTop: '20px', marginBottom: '20px'}}
             />
-            <button className="btn btn-primary" onClick={fetchMetadata} disabled={!url || isLoading} style={{width: '100%'}}>
-              {isLoading ? 'Fetching...' : 'Next'} <ChevronRight size={18} />
+            <button className="btn btn-primary" onClick={importYouTube} disabled={!url || isLoading} style={{width: '100%'}}>
+              {isLoading ? 'Loading...' : 'Next'} <ChevronRight size={18} />
             </button>
           </div>
         )}
 
-        {step === 'crop' && metadata && (
+        {step === 'crop' && clip && (
           <div className="funnel-step crop-step glass-card">
-            <Scissors size={48} color="var(--primary)" style={{marginBottom: 20}} />
-            <h2>Crop the Best Part</h2>
-            <p style={{fontSize: '0.9rem', marginBottom: '15px'}}>{metadata.title}</p>
-            {metadata.thumbnail && <img src={metadata.thumbnail} alt="thumb" className="crop-thumb" style={{width: '100%', borderRadius: '12px', marginBottom: '20px'}} />}
+            <Scissors size={48} color="var(--primary)" style={{marginBottom: 10}} />
+            <h2>Crop Scene</h2>
+            <p style={{fontSize: '0.9rem', marginBottom: '15px'}}>{clip.title}</p>
+            
+            <div className="mobile-video-container" style={{width: '100%', borderRadius: '12px', overflow: 'hidden', marginBottom: '20px'}}>
+              <UniversalPlayer 
+                src={clip.original_url}
+                controls={true}
+                style={{width: '100%', display: 'block', aspectRatio: '16/9'}}
+              />
+            </div>
             
             <div className="time-controls" style={{display: 'flex', gap: '15px', marginBottom: '20px'}}>
               <div className="input-group" style={{flex: 1}}>
                 <label className="input-label">Start (sec)</label>
-                <input type="number" className="input-field" value={startTime} onChange={e => setStartTime(Number(e.target.value))} min="0" max={metadata.duration} />
+                <input type="number" className="input-field" value={startTime} onChange={e => setStartTime(Number(e.target.value))} min="0" />
               </div>
               <div className="input-group" style={{flex: 1}}>
                 <label className="input-label">End (sec)</label>
-                <input type="number" className="input-field" value={endTime} onChange={e => setEndTime(Number(e.target.value))} min={startTime} max={metadata.duration} />
+                <input type="number" className="input-field" value={endTime} onChange={e => setEndTime(Number(e.target.value))} min={startTime} />
               </div>
             </div>
 
-            <button className="btn btn-primary" onClick={downloadAndCrop} disabled={isLoading} style={{width: '100%'}}>
-              {isLoading ? 'Downloading...' : 'Download & Dub'} <ChevronRight size={18} />
+            <button className="btn btn-primary" onClick={confirmCrop} style={{width: '100%'}}>
+              Lock & Dub <ChevronRight size={18} />
             </button>
           </div>
         )}
 
         {step === 'dub' && clip && (
           <div className="funnel-step dub-step">
-            <div className="mobile-video-container" style={{width: '100%', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#000', marginBottom: '20px'}}>
-              <video 
+            <div className="mobile-video-container" style={{width: '100%', borderRadius: '16px', overflow: 'hidden', backgroundColor: '#000', marginBottom: '20px', pointerEvents: 'none'}}>
+              <UniversalPlayer 
                 ref={videoRef}
                 src={clip.original_url}
-                className="video-element"
-                playsInline
+                controls={false}
+                style={{width: '100%', display: 'block', aspectRatio: '16/9'}}
                 onEnded={() => {
                   if(isRecording) stopRecording();
                   else pausePlayback();
                 }}
-                style={{width: '100%', display: 'block'}}
               />
             </div>
             
@@ -272,12 +274,17 @@ export default function MobileFunnel() {
 
         {step === 'result' && clip?.finalExportUrl && (
           <div className="funnel-step result-step glass-card" style={{textAlign: 'center'}}>
-            <h2>Your Dub is Ready!</h2>
-            <video src={clip.finalExportUrl} controls className="video-element" playsInline style={{borderRadius: 12, margin: '20px 0', width: '100%'}} />
+            <h2>Dub Saved!</h2>
+            <p style={{color: 'var(--text-muted)', marginBottom: 20}}>Since this is a YouTube clip, you can download your isolated studio voice track below.</p>
+            <audio src={clip.finalExportUrl} controls style={{width: '100%', marginBottom: 20}} />
             <a href={clip.finalExportUrl} download className="btn btn-primary" style={{width: '100%', marginBottom: '15px', display: 'flex', justifyContent: 'center'}}>
-              <Download size={18} /> Download MP4
+              <Download size={18} /> Download Audio Track
             </a>
-            <button className="btn btn-outline" onClick={() => setStep('input')} style={{width: '100%'}}>
+            <button className="btn btn-outline" onClick={() => {
+              setStep('input');
+              setUrl('');
+              setClip(null);
+            }} style={{width: '100%'}}>
               Dub Another Video
             </button>
           </div>
