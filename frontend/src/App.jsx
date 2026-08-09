@@ -175,7 +175,6 @@ function App() {
             ref={videoRef}
             src={videoUrl} 
             controls 
-            muted // Muted so user can record without loopback
             playsInline // PREVENTS IOS FULLSCREEN
             className="w-full rounded-lg mb-4 bg-black object-contain aspect-video"
             onError={() => {

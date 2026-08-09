@@ -193,7 +193,7 @@ app.post('/api/process-video', upload.single('audioBlob'), (req, res) => {
          console.error('Error cleaning up audio after failure', e);
       }
       
-      res.status(500).json({ error: 'Error processing video' });
+      res.status(500).json({ error: `Error processing video: ${err.message}` });
     });
 });
 
