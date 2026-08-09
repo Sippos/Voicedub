@@ -24,7 +24,7 @@ function App() {
     if (!youtubeUrl) return;
     setIsLoadingVideo(true);
     try {
-      const response = await fetch('http://localhost:3001/api/get-video', {
+      const response = await fetch('/api/get-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ youtubeUrl })
@@ -111,7 +111,7 @@ function App() {
     formData.append('audioBlob', audioBlob, 'user_dub.webm');
 
     try {
-      const response = await fetch('http://localhost:3001/api/process-video', {
+      const response = await fetch('/api/process-video', {
         method: 'POST',
         body: formData,
       });
