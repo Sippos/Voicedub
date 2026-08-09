@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import AudioVisualizer from './components/AudioVisualizer';
 
 function App() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
@@ -12,6 +13,7 @@ function App() {
   // Recording state
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState(null);
+  const [recordingStream, setRecordingStream] = useState(null); // Stream for visualizer
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
@@ -23,6 +25,7 @@ function App() {
   const handleLoadVideo = async () => {
     if (!youtubeUrl) return;
     setIsLoadingVideo(true);
+    setVideoUrl(''); // Reset previous video
     try {
       const response = await fetch('/api/get-video', {
         method: 'POST',
@@ -52,6 +55,8 @@ function App() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      setRecordingStream(stream);
+      
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -68,6 +73,7 @@ function App() {
         
         // Stop all tracks to release microphone
         stream.getTracks().forEach(track => track.stop());
+        setRecordingStream(null);
       };
 
       mediaRecorder.start();
@@ -76,7 +82,7 @@ function App() {
       // Start video playback silently for sync context
       if (videoRef.current) {
         videoRef.current.currentTime = startTime;
-        videoRef.current.play();
+        videoRef.current.play().catch(e => console.warn('Autoplay prevented:', e));
       }
 
     } catch (err) {
@@ -116,7 +122,10 @@ function App() {
         body: formData,
       });
       
-      if (!response.ok) throw new Error('Failed to process video');
+      if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to process video on server');
+      }
       
       // The server returns a file to download
       const blob = await response.blob();
@@ -125,7 +134,7 @@ function App() {
       
     } catch (err) {
       console.error(err);
-      alert('Failed to process dubbing.');
+      alert(`Dubbing failed: ${err.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -154,19 +163,23 @@ function App() {
           disabled={isLoadingVideo || !youtubeUrl}
           className="w-full bg-primary hover:bg-secondary text-white font-bold py-3 px-4 rounded-lg transition-colors disabled:opacity-50"
         >
-          {isLoadingVideo ? 'Loading...' : 'Load Video'}
+          {isLoadingVideo ? 'Loading API...' : 'Load Video'}
         </button>
       </div>
 
       {/* Video Player & Cropping */}
       {videoUrl && (
         <div className="w-full bg-slate-800 p-4 rounded-xl shadow-lg border border-slate-700 mb-6 flex flex-col items-center">
+          
           <video 
             ref={videoRef}
             src={videoUrl} 
             controls 
             muted // Muted so user can record without loopback
             className="w-full rounded-lg mb-4 bg-black object-contain aspect-video"
+            onError={() => {
+                alert("Error rendering video! The RapidAPI URL might be an HTML page, broken, or blocked by your browser's Cross-Origin Policy. Check the browser console.");
+            }}
           />
           
           <div className="w-full grid grid-cols-2 gap-4 mb-4">
@@ -190,6 +203,13 @@ function App() {
             </div>
           </div>
 
+          {/* Sound Wave Visualizer */}
+          {isRecording && (
+              <div className="w-full mb-4">
+                  <AudioVisualizer stream={recordingStream} isRecording={isRecording} />
+              </div>
+          )}
+
           {/* Recording Controls */}
           <div className="w-full flex justify-center mt-2 mb-4">
             {!isRecording ? (
@@ -211,7 +231,7 @@ function App() {
             )}
           </div>
 
-          {/* Audio preview (optional) */}
+          {/* Audio preview */}
           {audioBlob && !isRecording && (
             <div className="w-full mb-4">
                <p className="text-xs text-green-400 mb-2 text-center">Audio captured successfully!</p>
@@ -223,19 +243,27 @@ function App() {
           <button 
             onClick={handleDubAndDownload}
             disabled={!audioBlob || isProcessing}
-            className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-all disabled:opacity-50 mt-2"
+            className="w-full bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transition-all disabled:opacity-50 mt-2 flex justify-center items-center"
           >
-            {isProcessing ? 'Dubbing & Processing...' : 'Dub & Download'}
+            {isProcessing ? (
+               <span className="flex items-center space-x-2">
+                   <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                   <span>Dubbing in progress... (this might take a bit)</span>
+               </span>
+            ) : 'Dub & Download'}
           </button>
 
           {downloadUrl && (
-            <a 
-              href={downloadUrl} 
-              download="choicer_voicer_dub.mp4"
-              className="mt-4 text-primary hover:text-white underline text-sm transition-colors"
-            >
-              Click here if download doesn't start automatically
-            </a>
+            <div className="mt-4 p-4 bg-green-900/30 border border-green-500/50 rounded-lg text-center w-full">
+                <p className="text-green-400 text-sm mb-2">Video successfully dubbed!</p>
+                <a 
+                href={downloadUrl} 
+                download="choicer_voicer_dub.mp4"
+                className="text-white bg-green-600 hover:bg-green-500 px-4 py-2 rounded shadow transition-colors inline-block"
+                >
+                Download MP4
+                </a>
+            </div>
           )}
         </div>
       )}
