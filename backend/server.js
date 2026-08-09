@@ -136,85 +136,89 @@ app.post('/api/process-video', upload.single('audioBlob'), async (req, res) => {
     return res.status(400).json({ error: 'Missing required parameters' });
   }
 
-  // Resolve any 3xx redirects first because FFmpeg notoriously drops custom headers
-  // (like User-Agent) when following HTTP redirects, which causes 403 Forbidden from Google.
-  try {
-      const redirectRes = await axios.get(videoUrl, {
-          maxRedirects: 0,
-          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36' },
-          validateStatus: status => status >= 200 && status < 400
-      });
-      if (redirectRes.headers.location) {
-          console.log("Resolved videoUrl redirect:", redirectRes.headers.location.substring(0, 50) + "...");
-          videoUrl = redirectRes.headers.location;
-      }
-  } catch (err) {
-      console.warn("Could not resolve redirect, using original videoUrl. Warning:", err.message);
-  }
-
   const outputFilePath = path.join(uploadDir, `output_${Date.now()}.mp4`);
+  const tempVideoPath = path.join(uploadDir, `temp_video_${Date.now()}.mp4`);
   
   // Calculate duration to trim
   const duration = parseFloat(endTime) - parseFloat(startTime);
 
-  console.log(`Starting FFmpeg process:
-    Video URL: ${videoUrl.substring(0, 50)}...
-    Start Time: ${startTime}
-    Duration: ${duration}
-    Audio File: ${audioFile.path}
-  `);
+  console.log(`Starting secure download via Axios: ${videoUrl.substring(0, 50)}...`);
 
-  ffmpeg()
-    // Input 1: The original video from the direct MP4 URL
-    .input(videoUrl)
-    .inputOptions([
-        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
-        '-headers', 'Accept-Language: en-US,en;q=0.9\r\n'
-    ])
-    .setStartTime(startTime)
-    .setDuration(duration)
-    // Input 2: The user's recorded audio
-    .input(audioFile.path)
-    // Map video from input 0, audio from input 1
-    .outputOptions([
-      '-map 0:v:0',         // Use first video stream from first input
-      '-map 1:a:0',         // Use first audio stream from second input
-      '-c:v copy',          // Copy video codec (EXTREMELY FAST, avoids re-encoding)
-      '-c:a aac',           // Encode audio to AAC for MP4 compatibility
-      '-shortest'           // Finish encoding when the shortest input stream ends
-    ])
-    .save(outputFilePath)
-    .on('end', () => {
-      console.log('FFmpeg processing completed successfully.');
-      
-      // Send the resulting file to the client for download
-      res.download(outputFilePath, 'dubbed_video.mp4', (err) => {
-        if (err) {
-          console.error('Error sending file to client:', err);
-        }
-        
-        // CLEANUP: Delete temporary uploaded audio and the output video
-        try {
-          fs.unlinkSync(audioFile.path); // Delete uploaded audio blob
-          fs.unlinkSync(outputFilePath); // Delete generated mp4
-          console.log('Cleanup successful: Deleted temporary files.');
-        } catch (cleanupErr) {
-          console.error('Error during cleanup:', cleanupErr);
-        }
+  try {
+      // 1. Download the MP4 file to disk using Axios
+      // This bypasses the 403 Forbidden because Axios perfectly mimics a real browser
+      // and handles all 302 redirects natively without dropping headers.
+      const response = await axios({
+          method: 'GET',
+          url: videoUrl,
+          responseType: 'stream',
+          headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+              'Accept': '*/*',
+              'Connection': 'keep-alive'
+          }
       });
-    })
-    .on('error', (err) => {
-      console.error('FFmpeg error:', err.message);
+
+      const writer = fs.createWriteStream(tempVideoPath);
+      response.data.pipe(writer);
+
+      await new Promise((resolve, reject) => {
+          writer.on('finish', resolve);
+          writer.on('error', reject);
+      });
       
-      // Clean up uploaded audio on failure
-      try {
-         if (fs.existsSync(audioFile.path)) fs.unlinkSync(audioFile.path);
-      } catch (e) {
-         console.error('Error cleaning up audio after failure', e);
-      }
-      
-      res.status(500).json({ error: `Error processing video: ${err.message}` });
-    });
+      console.log('Video downloaded successfully to temporary file. Starting FFmpeg...');
+
+      // 2. Process with FFmpeg using the local files
+      ffmpeg()
+        .input(tempVideoPath)
+        .setStartTime(startTime)
+        .setDuration(duration)
+        .input(audioFile.path)
+        .outputOptions([
+          '-map 0:v:0',         // Use first video stream from first input
+          '-map 1:a:0',         // Use first audio stream from second input
+          '-c:v copy',          // Copy video codec (EXTREMELY FAST)
+          '-c:a aac',           // Encode audio to AAC for MP4 compatibility
+          '-shortest'           // Finish encoding when the shortest input stream ends
+        ])
+        .save(outputFilePath)
+        .on('end', () => {
+          console.log('FFmpeg processing completed successfully.');
+          
+          res.download(outputFilePath, 'dubbed_video.mp4', (err) => {
+            if (err) console.error('Error sending file to client:', err);
+            
+            // CLEANUP
+            try {
+              if (fs.existsSync(audioFile.path)) fs.unlinkSync(audioFile.path);
+              if (fs.existsSync(tempVideoPath)) fs.unlinkSync(tempVideoPath);
+              if (fs.existsSync(outputFilePath)) fs.unlinkSync(outputFilePath);
+              console.log('Cleanup successful: Deleted temporary files.');
+            } catch (cleanupErr) {
+              console.error('Error during cleanup:', cleanupErr);
+            }
+          });
+        })
+        .on('error', (err) => {
+          console.error('FFmpeg error:', err.message);
+          
+          try {
+             if (fs.existsSync(audioFile.path)) fs.unlinkSync(audioFile.path);
+             if (fs.existsSync(tempVideoPath)) fs.unlinkSync(tempVideoPath);
+          } catch (e) {
+             console.error('Error cleaning up after failure', e);
+          }
+          
+          res.status(500).json({ error: `Error processing video: ${err.message}` });
+        });
+
+  } catch (err) {
+      console.error("Failed to download video with Axios:", err.message);
+      // Cleanup audio if download fails
+      if (fs.existsSync(audioFile.path)) fs.unlinkSync(audioFile.path);
+      return res.status(500).json({ error: `Failed to download original video: ${err.message}` });
+  }
 });
 
 app.listen(PORT, () => {
