@@ -177,7 +177,6 @@ function App() {
             controls 
             muted // Muted so user can record without loopback
             playsInline // PREVENTS IOS FULLSCREEN
-            crossOrigin="anonymous" // Required to read audio data for the visualizer
             className="w-full rounded-lg mb-4 bg-black object-contain aspect-video"
             onError={() => {
                 alert("Error rendering video! The RapidAPI URL might be an HTML page, broken, or blocked by your browser's Cross-Origin Policy. Check the browser console.");
