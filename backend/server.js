@@ -38,6 +38,16 @@ app.post('/api/get-video', async (req, res) => {
   }
 
   try {
+    // -------------------------------------------------------------
+    // DEMO MODE: If the user inputs 'demo', bypass RapidAPI completely
+    // and return a working MP4 so they can test the full app pipeline.
+    // -------------------------------------------------------------
+    if (youtubeUrl.toLowerCase().trim() === 'demo') {
+      return res.json({
+        url: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+      });
+    }
+
     // NOTE: This is a placeholder for the RapidAPI integration.
     // Since the specific endpoint was not provided, this is ready to be configured.
     const rapidApiKey = process.env.RAPIDAPI_KEY;
