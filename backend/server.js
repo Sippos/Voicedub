@@ -44,7 +44,7 @@ app.post('/api/get-video', async (req, res) => {
     // -------------------------------------------------------------
     if (youtubeUrl.toLowerCase().trim() === 'demo') {
       return res.json({
-        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+        url: 'https://raw.githubusercontent.com/intel-iot-devkit/sample-videos/master/person-bicycle-car-detection.mp4'
       });
     }
 
