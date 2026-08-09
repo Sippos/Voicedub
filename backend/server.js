@@ -128,12 +128,28 @@ app.post('/api/get-video', async (req, res) => {
 });
 
 // Route 2: Process Video and Audio
-app.post('/api/process-video', upload.single('audioBlob'), (req, res) => {
-  const { videoUrl, startTime, endTime } = req.body;
+app.post('/api/process-video', upload.single('audioBlob'), async (req, res) => {
+  let { videoUrl, startTime, endTime } = req.body;
   const audioFile = req.file;
 
   if (!videoUrl || !startTime || !endTime || !audioFile) {
     return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  // Resolve any 3xx redirects first because FFmpeg notoriously drops custom headers
+  // (like User-Agent) when following HTTP redirects, which causes 403 Forbidden from Google.
+  try {
+      const redirectRes = await axios.get(videoUrl, {
+          maxRedirects: 0,
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36' },
+          validateStatus: status => status >= 200 && status < 400
+      });
+      if (redirectRes.headers.location) {
+          console.log("Resolved videoUrl redirect:", redirectRes.headers.location.substring(0, 50) + "...");
+          videoUrl = redirectRes.headers.location;
+      }
+  } catch (err) {
+      console.warn("Could not resolve redirect, using original videoUrl. Warning:", err.message);
   }
 
   const outputFilePath = path.join(uploadDir, `output_${Date.now()}.mp4`);
@@ -142,7 +158,7 @@ app.post('/api/process-video', upload.single('audioBlob'), (req, res) => {
   const duration = parseFloat(endTime) - parseFloat(startTime);
 
   console.log(`Starting FFmpeg process:
-    Video URL: ${videoUrl}
+    Video URL: ${videoUrl.substring(0, 50)}...
     Start Time: ${startTime}
     Duration: ${duration}
     Audio File: ${audioFile.path}
