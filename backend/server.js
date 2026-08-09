@@ -50,37 +50,63 @@ app.post('/api/get-video', async (req, res) => {
     const rapidApiHost = process.env.RAPIDAPI_HOST;
     const rapidApiUrl = process.env.RAPIDAPI_URL; // e.g. https://youtube-media-downloader.p.rapidapi.com/v2/video/details
 
-    if (!rapidApiKey || !rapidApiHost || !rapidApiUrl) {
-      console.warn('RapidAPI config missing in .env. Returning a mock MP4 URL for testing.');
-      // Fallback/mock video for local testing if API key is not configured
-      return res.json({
-        url: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
-      });
+    // Ensure API Key is available
+    if (!rapidApiKey) {
+      return res.status(500).json({ error: 'RAPIDAPI_KEY is not set in environment variables.' });
     }
 
-    // Ensure we handle the weird path from this specific API
-    const response = await axios.get(rapidApiUrl, {
-      params: { 
-        url: youtubeUrl,
-        title: "Video" // The API snippet required a title parameter
-      },
+    // Hit the yt-api.p.rapidapi.com /dl endpoint
+    const options = {
+      method: 'GET',
+      url: 'https://yt-api.p.rapidapi.com/dl',
+      params: { id: videoId },
       headers: {
-        'Content-Type': 'application/json',
         'x-rapidapi-key': rapidApiKey,
-        'x-rapidapi-host': rapidApiHost
+        'x-rapidapi-host': 'yt-api.p.rapidapi.com'
       }
-    });
+    };
+
+    let data = null;
+    let retries = 5;
     
-    // Extract the MP4 URL from the response. 
-    // We check common keys returned by RapidAPI services:
-    const data = response.data;
-    const mp4Url = data.url || data.link || data.download_url || data.download || 
-                  (data[0] && data[0].url) || (data.data && data.data.url) ||
-                  (data.url_video); 
+    while (retries > 0) {
+      const response = await axios.request(options);
+      data = response.data;
+      
+      if (data.status === 'processing') {
+          console.log(`Video ${videoId} is still processing on RapidAPI, waiting 2s...`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          retries--;
+      } else {
+          break; // Data is ready
+      }
+    }
+
+    if (data.status === 'processing' || !data) {
+        throw new Error('RapidAPI timeout: Video is taking too long to process on the provider side.');
+    }
+
+    let mp4Url = null;
     
+    // Find pre-muxed mp4 format (contains both audio and video)
+    if (data.formats && Array.isArray(data.formats)) {
+        const mp4Format = data.formats.find(f => f.mimeType && f.mimeType.includes('video/mp4'));
+        if (mp4Format) {
+            mp4Url = mp4Format.url;
+        }
+    }
+
+    // Fallbacks just in case
     if (!mp4Url) {
-        console.error("Unrecognized API response format:", data);
-        throw new Error("Could not extract MP4 URL from RapidAPI response. Check the server logs for the raw response.");
+       mp4Url = data.url || data.link || (data.formats && data.formats[0] && data.formats[0].url);
+    }
+
+    if (!mp4Url) {
+      console.error('Failed to extract URL. Raw data:', JSON.stringify(data).substring(0, 300));
+      return res.status(500).json({ 
+        error: 'Could not extract MP4 URL from RapidAPI response.',
+        details: 'No video/mp4 stream found.'
+      });
     }
 
     return res.json({ url: mp4Url });
