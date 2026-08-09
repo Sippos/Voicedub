@@ -1,20 +1,17 @@
 {
   "name": "voicedub-arena",
   "version": "1.0.0",
-  "description": "Choicer Voicer clone web application for voice dubbing and watch parties with friends",
+  "description": "Choicer Voicer clone web application",
   "scripts": {
-    "dev": "concurrently -n \"SERVER,CLIENT\" -c \"magenta,cyan\" \"npm run server\" \"npm run client\"",
+    "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"magenta,cyan\" \"npm run backend\" \"npm run frontend\"",
     "start": "npm run dev",
-    "server": "cd server && npm run dev",
-    "client": "cd client && npm run dev",
-    "build": "cd client && npm run build"
+    "backend": "cd backend && npm run start",
+    "frontend": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build"
   },
   "keywords": [
     "voiceover",
-    "dubbing",
-    "game",
-    "choicer-voicer",
-    "party-game"
+    "dubbing"
   ],
   "author": "Antigravity & Sebastian",
   "license": "MIT",

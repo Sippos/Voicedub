@@ -294,7 +294,7 @@ app.post('/api/clips/youtube', async (req, res) => {
     const id = uuidv4();
 
     // Construct standard embedded streaming URL and virtual filename
-    const original_url = `https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&origin=${encodeURIComponent('http://localhost:5173')}`;
+    const original_url = `https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${encodeURIComponent('http://localhost:5173')}`;
     const filename = `youtube_${videoId}`;
     const created_at = new Date().toISOString();
 

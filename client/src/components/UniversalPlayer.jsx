@@ -212,11 +212,11 @@ export default React.forwardRef(function UniversalPlayer({
         <iframe
           id={playerId}
           ref={iframeRef}
-          src={`https://www.youtube-nocookie.com/embed/${videoId}?enablejsapi=1&origin=${window.location.origin}&playsinline=1&controls=${controls ? 1 : 0}&rel=0&modestbranding=1`}
+          src={`https://www.youtube.com/embed/${videoId}?enablejsapi=1&origin=${window.location.origin}&playsinline=1&controls=${controls ? 1 : 0}&rel=0&modestbranding=1`}
           className={className}
           style={{ width: '100%', height: '100%', border: 'none', display: 'block' }}
-          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-          allowFullScreen
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          allowFullScreen={true}
           title="YouTube video player"
         />
       </div>
