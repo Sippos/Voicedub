@@ -79,8 +79,12 @@ app.post('/api/get-video', async (req, res) => {
 
     return res.json({ url: mp4Url });
   } catch (error) {
-    console.error('Error fetching video from RapidAPI:', error.message);
-    res.status(500).json({ error: 'Failed to fetch video link' });
+    const errorDetails = error.response ? error.response.data : error.message;
+    console.error('Error fetching video from RapidAPI:', errorDetails);
+    res.status(500).json({ 
+        error: 'Failed to fetch video link', 
+        details: errorDetails 
+    });
   }
 });
 
