@@ -44,7 +44,7 @@ app.post('/api/get-video', async (req, res) => {
     // -------------------------------------------------------------
     if (youtubeUrl.toLowerCase().trim() === 'demo') {
       return res.json({
-        url: 'http://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
+        url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'
       });
     }
 
