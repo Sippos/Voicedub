@@ -30,14 +30,19 @@ function App() {
         body: JSON.stringify({ youtubeUrl })
       });
       const data = await response.json();
-      if (data.url) {
+      
+      if (response.ok && data.url) {
         setVideoUrl(data.url);
       } else {
-        alert('Failed to get video URL');
+        const errMsg = data.details 
+            ? `Backend Error: ${JSON.stringify(data.details)}` 
+            : data.error || 'Failed to get video URL';
+        alert(`Fehler: ${errMsg}`);
+        console.error("Server Response:", data);
       }
     } catch (err) {
       console.error(err);
-      alert('Error fetching video link.');
+      alert('Network or parsing error. Is the backend running?');
     } finally {
       setIsLoadingVideo(false);
     }
