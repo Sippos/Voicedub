@@ -3,7 +3,6 @@ const cors = require('cors');
 const multer = require('multer');
 const axios = require('axios');
 const ffmpeg = require('fluent-ffmpeg');
-const ffmpegStatic = require('ffmpeg-static');
 const path = require('path');
 const fs = require('fs');
 require('dotenv').config();
@@ -18,9 +17,6 @@ app.use(express.json());
 
 // Serve static frontend files in production
 app.use(express.static(path.join(__dirname, '../frontend/dist')));
-
-// Set up ffmpeg path
-ffmpeg.setFfmpegPath(ffmpegStatic);
 
 // Setup multer for audio file uploads (saving to temporary directory)
 const uploadDir = path.join(__dirname, 'uploads');
