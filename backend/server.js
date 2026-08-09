@@ -151,6 +151,10 @@ app.post('/api/process-video', upload.single('audioBlob'), (req, res) => {
   ffmpeg()
     // Input 1: The original video from the direct MP4 URL
     .input(videoUrl)
+    .inputOptions([
+        '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36',
+        '-headers', 'Accept-Language: en-US,en;q=0.9\r\n'
+    ])
     .setStartTime(startTime)
     .setDuration(duration)
     // Input 2: The user's recorded audio
