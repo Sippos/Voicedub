@@ -46,9 +46,16 @@ app.post('/api/get-video', async (req, res) => {
 
     // NOTE: This is a placeholder for the RapidAPI integration.
     // Since the specific endpoint was not provided, this is ready to be configured.
+    // Extract Video ID
+    const extractVideoId = (url) => {
+        const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+        const match = url.match(regExp);
+        return (match && match[2].length === 11) ? match[2] : url; // fallback to url if it's just an id
+    };
+
+    const videoId = extractVideoId(youtubeUrl);
+    
     const rapidApiKey = process.env.RAPIDAPI_KEY;
-    const rapidApiHost = process.env.RAPIDAPI_HOST;
-    const rapidApiUrl = process.env.RAPIDAPI_URL; // e.g. https://youtube-media-downloader.p.rapidapi.com/v2/video/details
 
     // Ensure API Key is available
     if (!rapidApiKey) {
